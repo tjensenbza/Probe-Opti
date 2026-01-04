@@ -1,0 +1,1356 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Flachglas Zuschnitt-Optimierung (Tafelliste + Float/VSG + High Quality + Lookahead)</title>
+  <style>
+    :root { --card:#121a24; --muted:#91a4b7; --text:#e8f0fa; --line:#223043; }
+    *{ box-sizing:border-box; }
+    body{ margin:0; font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,"Helvetica Neue",Arial;
+      background:linear-gradient(180deg,#070a0f, #0b0f14 20%, #070a0f); color:var(--text); }
+    header{ padding:18px 18px 8px; max-width:1200px; margin:0 auto; }
+    h1{ font-size:18px; margin:0 0 6px; letter-spacing:.2px; }
+    .sub{ color:var(--muted); font-size:13px; line-height:1.3; }
+    main{ max-width:1200px; margin:0 auto; padding:12px 18px 28px; display:grid; gap:12px; grid-template-columns: 440px 1fr; }
+    @media (max-width: 980px){ main{ grid-template-columns: 1fr; } }
+    .card{ background:rgba(18,26,36,.92); border:1px solid var(--line); border-radius:14px; padding:14px; box-shadow:0 10px 30px rgba(0,0,0,.25); }
+    .card h2{ font-size:14px; margin:0 0 10px; color:#cfe3ff; }
+    .row{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .row3{ display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+    label{ display:block; font-size:12px; color:var(--muted); margin:0 0 6px; }
+    input, select, textarea{
+      width:100%; padding:10px 10px; border-radius:10px; border:1px solid var(--line);
+      background:#0c121a; color:var(--text); outline:none;
+    }
+    textarea{ min-height:92px; resize:vertical; }
+    input:disabled, textarea:disabled, select:disabled{ opacity:.55; cursor:not-allowed; }
+    table{ width:100%; border-collapse:collapse; overflow:hidden; border-radius:12px; border:1px solid var(--line); }
+    thead th{ text-align:left; font-size:12px; color:#b9d2ef; background:#0c121a; padding:10px; border-bottom:1px solid var(--line); }
+    tbody td{ padding:8px 10px; border-bottom:1px solid rgba(34,48,67,.6); }
+    tbody tr:last-child td{ border-bottom:none; }
+    tbody input{ padding:8px; border-radius:10px; }
+    .btnbar{ display:flex; gap:10px; flex-wrap:wrap; }
+    button{
+      cursor:pointer; border-radius:12px; border:1px solid var(--line); background:#0c121a; color:var(--text);
+      padding:10px 12px; font-weight:600; font-size:13px;
+    }
+    button:hover{ border-color:#34527a; }
+    .primary{ background:linear-gradient(135deg, rgba(94,234,212,.18), rgba(99,102,241,.12)); border-color:rgba(94,234,212,.35); }
+    .danger{ border-color:rgba(239,68,68,.35); background:rgba(239,68,68,.08); }
+    .pill{ display:inline-flex; align-items:center; gap:8px; padding:8px 10px; border-radius:999px; border:1px solid var(--line); background:rgba(12,18,26,.6); color:#d6e7ff; font-size:12px; }
+    .stats{ display:flex; gap:10px; flex-wrap:wrap; margin-top:10px; }
+    .muted{ color:var(--muted); font-size:12px; line-height:1.35; }
+    .canvasWrap{ display:flex; flex-direction:column; gap:10px; }
+    canvas{ width:100%; height:auto; border-radius:14px; border:1px solid var(--line); background:#070b10; }
+    .topline{ display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+    .nav{ display:flex; gap:10px; flex-wrap:wrap; }
+    .small{ font-size:12px; color:var(--muted); }
+    .hr{ height:1px; background:var(--line); margin:12px 0; }
+    .hint{ font-size:12px; color:#c6d8ee; background:rgba(94,234,212,.06); border:1px solid rgba(94,234,212,.18); padding:10px; border-radius:12px; }
+    .fileRow{ display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+    .chk{ display:flex; align-items:center; gap:10px; padding:10px 10px; border:1px solid var(--line); background:#0c121a; border-radius:10px; }
+    .chk input{ width:auto; }
+    code{ background:rgba(12,18,26,.8); border:1px solid var(--line); padding:2px 6px; border-radius:8px; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Zuschnitt-Optimierung – Tafelliste + Float/VSG + High-Quality (Lookahead)</h1>
+  <div class="sub">
+    Standard: <b>maximale Materialnutzung / minimaler Verschnitt</b>, Rotation <b>AN</b>. “Positionen zusammenhalten” ist <b>AUS</b> (nur wenn ausdrücklich gewählt).
+  </div>
+</header>
+
+<main>
+  <section class="card">
+    <h2>1) Tafelliste & Optionen</h2>
+
+    <div class="row" style="margin-bottom:10px;">
+      <div>
+        <label>Glasart</label>
+        <select id="glassMode">
+          <option value="float" selected>Floatglas (Randschnitt, Top-Ausnutzung)</option>
+          <option value="vsg">VSG (kein Randschnitt, keine Z-Schnitte / Guillotine)</option>
+        </select>
+      </div>
+      <div>
+        <label>Qualität (Zeitbudget)</label>
+        <select id="quality">
+          <option value="fast">Schnell (~0.4s)</option>
+          <option value="high" selected>Hoch (~1.2s)</option>
+          <option value="veryhigh">Sehr hoch (~3.0s)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row" style="margin-bottom:10px;">
+      <div>
+        <label>Rotation erlauben</label>
+        <select id="allowRotate">
+          <option value="1" selected>Ja</option>
+          <option value="0">Nein</option>
+        </select>
+      </div>
+      <div class="chk" title="Standard AUS. Wenn EIN: versucht der Optimierer, Teile gleicher Position/Name bevorzugt auf derselben Tafel zu halten (kann Ausbeute verschlechtern).">
+        <input id="keepTogether" type="checkbox" />
+        <div>
+          <div style="font-weight:700; font-size:13px;">Positionen zusammenhalten</div>
+          <div class="muted">nur wenn ausdrücklich gewünscht</div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <label>Tafelliste (je Zeile <code>Breite×Höhe</code> in mm, z.B. <code>3210x2250</code>)</label>
+      <textarea id="sheetList" spellcheck="false">3210x2250
+6000x3210</textarea>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <div>
+        <label>Randschnitt X (mm) – pro Seite (nur Float)</label>
+        <input id="trimX" type="number" value="10" min="0" step="1">
+      </div>
+      <div>
+        <label>Randschnitt Y (mm) – pro Seite (nur Float)</label>
+        <input id="trimY" type="number" value="10" min="0" step="1">
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <div>
+        <label>Rand visualisieren</label>
+        <select id="showTrim">
+          <option value="1" selected>Ja</option>
+          <option value="0">Nein</option>
+        </select>
+      </div>
+      <div>
+        <label>Skalierung Canvas</label>
+        <select id="canvasScaleMode">
+          <option value="fit" selected>Auto (fit)</option>
+          <option value="1">1:1 (falls klein)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="hint" style="margin-top:12px;" id="modeHint">
+      Lookahead: Tafelauswahl schaut 1 Schritt voraus (verhindert “zu gierige” erste Tafeln, verbessert Verschnitt).
+    </div>
+
+    <div class="hr"></div>
+
+    <h2>2) Zuschnitte</h2>
+    <div class="muted" style="margin-bottom:10px;">Maße in mm. Menge wird automatisch auf Einzelteile aufgelöst.</div>
+
+    <table id="cutsTable">
+      <thead>
+        <tr>
+          <th style="width:34%;">Position / Name</th>
+          <th style="width:18%;">Breite</th>
+          <th style="width:18%;">Höhe</th>
+          <th style="width:14%;">Menge</th>
+          <th style="width:16%;">Aktion</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div class="btnbar" style="margin-top:10px;">
+      <button id="addRowBtn">+ Zeile</button>
+      <button id="fillDemoBtn">Demo füllen</button>
+      <button id="clearBtn" class="danger">Leeren</button>
+    </div>
+
+    <div class="hr"></div>
+
+    <h2>3) Import / Export</h2>
+    <div class="fileRow">
+      <div>
+        <label>CSV Import (Name,Breite,Höhe,Menge)</label>
+        <input id="csvFile" type="file" accept=".csv,text/csv">
+      </div>
+      <div>
+        <label>JSON Import (Plan oder Zuschnittliste)</label>
+        <input id="jsonFile" type="file" accept=".json,application/json">
+      </div>
+    </div>
+    <div class="btnbar" style="margin-top:10px;">
+      <button id="exportCSV">CSV Export</button>
+      <button id="exportJSON">JSON Export (Ergebnis)</button>
+    </div>
+
+    <div class="hr"></div>
+
+    <div class="btnbar">
+      <button id="optBtn" class="primary">Optimieren (High-Quality)</button>
+      <button id="resetViewBtn">Ansicht zurücksetzen</button>
+    </div>
+  </section>
+
+  <section class="card canvasWrap">
+    <div class="topline">
+      <div>
+        <div style="font-weight:700;">Ergebnis / Visualisierung</div>
+        <div class="small" id="summaryLine">Noch nicht optimiert.</div>
+      </div>
+      <div class="nav">
+        <button id="prevSheetBtn">← Vorherige Tafel</button>
+        <button id="nextSheetBtn">Nächste Tafel →</button>
+        <button id="pngBtn">PNG (aktuelle Tafel)</button>
+        <button id="pdfBtn">PDF (alle Tafeln)</button>
+      </div>
+    </div>
+
+    <canvas id="cnv" width="900" height="620"></canvas>
+
+    <div class="stats" id="statsPills"></div>
+
+    <div class="hr"></div>
+
+    <div>
+      <div style="font-weight:700; margin-bottom:6px;">Bericht</div>
+      <div class="muted" id="report"></div>
+    </div>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+
+<script>
+/** ---------------------------
+ *  Helpers
+ * --------------------------- */
+const $ = (id) => document.getElementById(id);
+function mm2_to_m2(mm2){ return mm2 / 1_000_000; }
+function fmt(n, d=2){ return Number(n).toFixed(d); }
+function clamp(v, a, b){ return Math.max(a, Math.min(b, v)); }
+
+function escapeHtml(str){
+  return String(str)
+    .replaceAll('&','&amp;')
+    .replaceAll('<','&lt;')
+    .replaceAll('>','&gt;')
+    .replaceAll('"','&quot;')
+    .replaceAll("'",'&#39;');
+}
+
+function downloadBlob(filename, blob){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function readFileAsText(file){
+  return new Promise((res, rej) => {
+    const fr = new FileReader();
+    fr.onload = () => res(fr.result);
+    fr.onerror = () => rej(fr.error);
+    fr.readAsText(file);
+  });
+}
+
+function mulberry32(seed){
+  let t = seed >>> 0;
+  return function(){
+    t += 0x6D2B79F5;
+    let r = Math.imul(t ^ (t >>> 15), 1 | t);
+    r ^= r + Math.imul(r ^ (r >>> 7), 61 | r);
+    return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function shuffleInPlace(arr, rng){
+  for (let i = arr.length - 1; i > 0; i--){
+    const j = Math.floor(rng() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+function hashHue(str){
+  let h=0; for (let i=0;i<str.length;i++) h=(h*31+str.charCodeAt(i))>>>0;
+  return h%360;
+}
+
+/** ---------------------------
+ *  UI: Cuts table
+ * --------------------------- */
+const cutsTbody = $('cutsTable').querySelector('tbody');
+
+function addCutRow({name="", w=100, h=100, qty=1} = {}){
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td><input type="text" value="${escapeHtml(name)}" placeholder="z.B. Pos 10"></td>
+    <td><input type="number" min="1" step="1" value="${w}"></td>
+    <td><input type="number" min="1" step="1" value="${h}"></td>
+    <td><input type="number" min="1" step="1" value="${qty}"></td>
+    <td><button class="danger">Entfernen</button></td>
+  `;
+  tr.querySelector('button').addEventListener('click', () => tr.remove());
+  cutsTbody.appendChild(tr);
+}
+
+function getCutsFromUI(){
+  const rows = [...cutsTbody.querySelectorAll('tr')];
+  const items = [];
+  for (const r of rows){
+    const [nameEl, wEl, hEl, qEl] = r.querySelectorAll('input');
+    const name = nameEl.value.trim() || "Teil";
+    const w = Math.floor(Number(wEl.value));
+    const h = Math.floor(Number(hEl.value));
+    const qty = Math.floor(Number(qEl.value));
+    if (!Number.isFinite(w) || !Number.isFinite(h) || !Number.isFinite(qty)) continue;
+    if (w<=0 || h<=0 || qty<=0) continue;
+    items.push({name, w, h, qty});
+  }
+  return items;
+}
+
+function expandCuts(items){
+  const rects = [];
+  let idx = 1;
+  for (const it of items){
+    for (let i=0;i<it.qty;i++){
+      rects.push({
+        id: `${it.name}-${idx++}`,
+        name: it.name,
+        group: it.name,
+        w: it.w,
+        h: it.h,
+        area: it.w * it.h
+      });
+    }
+  }
+  return rects;
+}
+
+/** ---------------------------
+ *  Tafelliste parser
+ * --------------------------- */
+function parseSheetList(text){
+  const lines = String(text).split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  const sheets = [];
+  for (const l of lines){
+    const m = l.match(/^(\d+)\s*[xX×]\s*(\d+)$/);
+    if (!m) continue;
+    const w = Number(m[1]), h = Number(m[2]);
+    if (w>0 && h>0) sheets.push({w, h});
+  }
+  return sheets;
+}
+
+function formatCounts(sheets){
+  const map = new Map();
+  for (const sh of sheets){
+    const key = `${sh.width}x${sh.height}`;
+    map.set(key, (map.get(key) || 0) + 1);
+  }
+  return [...map.entries()].sort((a,b)=>b[1]-a[1]);
+}
+
+/** ---------------------------
+ *  Objective / Scoring (strict: waste -> totalArea -> sheetCount)
+ * --------------------------- */
+function scorePlan(sheets){
+  const totalArea = sheets.reduce((s,sh)=>s + sh.width*sh.height, 0);
+  const usedArea  = sheets.reduce((s,sh)=>s + sh.used, 0);
+  const waste     = totalArea - usedArea;
+  const n         = sheets.length;
+  return {waste, totalArea, n, usedArea};
+}
+
+// IMPORTANT: prioritizes minimal waste / maximal usage
+function betterScore(a,b){
+  if (!b) return true;
+
+  // 1) Verschnitt minimieren
+  if (a.waste !== b.waste) return a.waste < b.waste;
+
+  // 2) bei gleichem Verschnitt: weniger Gesamtfläche => höhere Ausbeute
+  if (a.totalArea !== b.totalArea) return a.totalArea < b.totalArea;
+
+  // 3) erst danach: weniger Tafeln
+  if (a.n !== b.n) return a.n < b.n;
+
+  // 4) letzte Kante: mehr genutzte Fläche
+  return a.usedArea > b.usedArea;
+}
+
+/** ---------------------------
+ *  Ordering
+ * --------------------------- */
+function orderRects(rects, mode, rng){
+  const arr = rects.slice();
+  switch(mode){
+    case "height":    arr.sort((a,b)=> (b.h-a.h) || (b.area-a.area)); break;
+    case "width":     arr.sort((a,b)=> (b.w-a.w) || (b.area-a.area)); break;
+    case "maxside":   arr.sort((a,b)=> (Math.max(b.w,b.h)-Math.max(a.w,a.h)) || (b.area-a.area)); break;
+    case "perimeter": arr.sort((a,b)=> ((b.w+b.h)-(a.w+a.h)) || (b.area-a.area)); break;
+    case "random":    shuffleInPlace(arr, rng); break;
+    case "area":
+    default:          arr.sort((a,b)=> (b.area-a.area) || (Math.max(b.w,b.h)-Math.max(a.w,a.h)));
+  }
+  return arr;
+}
+
+function reorderKeepTogether(rects, rng){
+  const map = new Map();
+  for (const r of rects){
+    if (!map.has(r.group)) map.set(r.group, []);
+    map.get(r.group).push(r);
+  }
+  const groups = [...map.entries()].map(([k,arr])=>{
+    const area = arr.reduce((s,x)=>s+x.area,0);
+    return {k, area, arr};
+  });
+  groups.sort((a,b)=>b.area-a.area);
+
+  const out = [];
+  for (const g of groups){
+    shuffleInPlace(g.arr, rng);
+    g.arr.sort((a,b)=>b.area-a.area);
+    out.push(...g.arr);
+  }
+  return out;
+}
+
+/** ---------------------------
+ *  Float: MaxRects
+ * --------------------------- */
+class MaxRectsBin {
+  constructor(width, height){
+    this.width = width;
+    this.height = height;
+    this.free = [{x:0,y:0,w:width,h:height}];
+    this.used = [];
+  }
+
+  insert(rectW, rectH, heuristic){
+    let best = null;
+    let bestA = Infinity;
+    let bestB = Infinity;
+
+    for (const fr of this.free){
+      if (rectW > fr.w || rectH > fr.h) continue;
+      const leftoverW = fr.w - rectW;
+      const leftoverH = fr.h - rectH;
+      const shortSide = Math.min(leftoverW, leftoverH);
+      const longSide  = Math.max(leftoverW, leftoverH);
+      const areaFit   = fr.w*fr.h - rectW*rectH;
+
+      let a, b;
+      switch(heuristic){
+        case "BLSF": a = longSide; b = shortSide; break;
+        case "BAF":  a = areaFit;  b = shortSide; break;
+        case "BSSF":
+        default:     a = shortSide; b = longSide;
+      }
+
+      if (a < bestA || (a === bestA && b < bestB)){
+        bestA = a; bestB = b;
+        best = {x:fr.x, y:fr.y, w:rectW, h:rectH};
+      }
+    }
+    if (!best) return null;
+    this._place(best);
+    return best;
+  }
+
+  _place(node){
+    const newFree = [];
+    for (const fr of this.free){
+      if (!this._intersects(node, fr)){
+        newFree.push(fr);
+        continue;
+      }
+      for (const s of this._splitFreeNode(fr, node)) newFree.push(s);
+    }
+    this.free = this._pruneFreeList(newFree);
+    this.used.push(node);
+  }
+
+  _intersects(a,b){
+    return !(a.x + a.w <= b.x || a.x >= b.x + b.w || a.y + a.h <= b.y || a.y >= b.y + b.h);
+  }
+
+  _splitFreeNode(f, u){
+    const out = [];
+    const fx=f.x, fy=f.y, fw=f.w, fh=f.h;
+    const ux=u.x, uy=u.y, uw=u.w, uh=u.h;
+
+    if (uy > fy && uy < fy + fh) out.push({x:fx,y:fy,w:fw,h:uy-fy});
+    if (uy + uh < fy + fh) out.push({x:fx,y:uy+uh,w:fw,h:(fy+fh)-(uy+uh)});
+
+    if (ux > fx && ux < fx + fw){
+      const top = Math.max(fy, uy), bottom = Math.min(fy+fh, uy+uh);
+      out.push({x:fx,y:top,w:ux-fx,h:bottom-top});
+    }
+    if (ux + uw < fx + fw){
+      const top = Math.max(fy, uy), bottom = Math.min(fy+fh, uy+uh);
+      out.push({x:ux+uw,y:top,w:(fx+fw)-(ux+uw),h:bottom-top});
+    }
+    return out.filter(r => r.w>0 && r.h>0);
+  }
+
+  _pruneFreeList(list){
+    const pruned=[];
+    for (let i=0;i<list.length;i++){
+      const a=list[i];
+      let contained=false;
+      for (let j=0;j<list.length;j++){
+        if (i===j) continue;
+        const b=list[j];
+        if (this._contains(b,a)){ contained=true; break; }
+      }
+      if (!contained) pruned.push(a);
+    }
+    return pruned;
+  }
+
+  _contains(a,b){
+    return b.x>=a.x && b.y>=a.y && b.x+b.w<=a.x+a.w && b.y+b.h<=a.y+a.h;
+  }
+
+  usedArea(){ return this.used.reduce((s,r)=>s + r.w*r.h, 0); }
+}
+
+/** ---------------------------
+ *  VSG: Guillotine (no Z-cuts)
+ * --------------------------- */
+class GuillotineBin {
+  constructor(width, height, splitRule){
+    this.width = width;
+    this.height = height;
+    this.splitRule = splitRule; // shorter/longer/horizontal/vertical
+    this.free = [{x:0,y:0,w:width,h:height}];
+    this.used = [];
+  }
+
+  insert(rectW, rectH, heuristic){
+    let best = null;
+    let bestA = Infinity;
+    let bestB = Infinity;
+
+    for (let i=0;i<this.free.length;i++){
+      const fr = this.free[i];
+      if (rectW > fr.w || rectH > fr.h) continue;
+
+      const leftoverW = fr.w - rectW;
+      const leftoverH = fr.h - rectH;
+      const shortSide = Math.min(leftoverW, leftoverH);
+      const longSide  = Math.max(leftoverW, leftoverH);
+      const areaFit   = fr.w*fr.h - rectW*rectH;
+
+      let a,b;
+      switch(heuristic){
+        case "BLSF": a = longSide; b = shortSide; break;
+        case "BAF":  a = areaFit;  b = shortSide; break;
+        case "BSSF":
+        default:     a = shortSide; b = longSide; break;
+      }
+
+      if (a < bestA || (a === bestA && b < bestB)){
+        bestA = a; bestB = b;
+        best = {x:fr.x, y:fr.y, w:rectW, h:rectH, freeIndex:i, freeRect:fr};
+      }
+    }
+    if (!best) return null;
+
+    this._splitAndPlace(best);
+    return {x:best.x, y:best.y, w:best.w, h:best.h};
+  }
+
+  _splitAndPlace(node){
+    const fr = node.freeRect;
+    this.free.splice(node.freeIndex, 1);
+
+    const leftoverW = fr.w - node.w;
+    const leftoverH = fr.h - node.h;
+
+    let split;
+    switch(this.splitRule){
+      case "horizontal": split = "H"; break;
+      case "vertical":   split = "V"; break;
+      case "longer":     split = (leftoverW > leftoverH) ? "V" : "H"; break;
+      case "shorter":
+      default:           split = (leftoverW < leftoverH) ? "V" : "H"; break;
+    }
+
+    const newRects = [];
+    if (split === "V"){
+      if (leftoverW > 0) newRects.push({x:fr.x + node.w, y:fr.y, w:leftoverW, h:fr.h});
+      if (leftoverH > 0) newRects.push({x:fr.x, y:fr.y + node.h, w:node.w, h:leftoverH});
+    } else {
+      if (leftoverH > 0) newRects.push({x:fr.x, y:fr.y + node.h, w:fr.w, h:leftoverH});
+      if (leftoverW > 0) newRects.push({x:fr.x + node.w, y:fr.y, w:leftoverW, h:node.h});
+    }
+
+    this.free.push(...newRects);
+    this.free = this._pruneFreeList(this.free);
+    this.used.push({x:node.x, y:node.y, w:node.w, h:node.h});
+  }
+
+  _pruneFreeList(list){
+    const pruned=[];
+    for (let i=0;i<list.length;i++){
+      const a=list[i];
+      let contained=false;
+      for (let j=0;j<list.length;j++){
+        if (i===j) continue;
+        const b=list[j];
+        if (this._contains(b,a)){ contained=true; break; }
+      }
+      if (!contained) pruned.push(a);
+    }
+    return pruned;
+  }
+  _contains(a,b){
+    return b.x>=a.x && b.y>=a.y && b.x+b.w<=a.x+a.w && b.y+b.h<=a.y+a.h;
+  }
+  usedArea(){ return this.used.reduce((s,r)=>s + r.w*r.h, 0); }
+}
+
+/** ---------------------------
+ *  Lookahead helpers
+ * --------------------------- */
+// score for choosing a sheet format in a single step, based on "used", "ratio", or "hybrid"
+function sheetMetric(used, sheetArea, rule, alpha){
+  if (rule === "ratio") return used / sheetArea;
+  if (rule === "hybrid") return used - alpha * sheetArea;
+  return used; // "used"
+}
+
+// compute best possible "next sheet metric" for remaining parts
+function bestNextMetricFloat(remaining, sheetChoices, trimX, trimY, allowRotate, heuristic, rule, alpha){
+  let best = -Infinity;
+  for (const sc of sheetChoices){
+    const usableW = sc.w - 2*trimX, usableH = sc.h - 2*trimY;
+    if (usableW<=0 || usableH<=0) continue;
+    const bin = new MaxRectsBin(usableW, usableH);
+    let used = 0;
+    for (const r of remaining){
+      let p = bin.insert(r.w, r.h, heuristic);
+      if (!p && allowRotate && r.w!==r.h) p = bin.insert(r.h, r.w, heuristic);
+      if (p) used += p.w*p.h;
+    }
+    if (used <= 0) continue;
+    const m = sheetMetric(used, sc.w*sc.h, rule, alpha);
+    if (m > best) best = m;
+  }
+  return best === -Infinity ? 0 : best;
+}
+
+function bestNextMetricVsg(remaining, sheetChoices, allowRotate, heuristic, splitRule, rule, alpha){
+  let best = -Infinity;
+  for (const sc of sheetChoices){
+    const bin = new GuillotineBin(sc.w, sc.h, splitRule);
+    let used = 0;
+    for (const r of remaining){
+      let p = bin.insert(r.w, r.h, heuristic);
+      if (!p && allowRotate && r.w!==r.h) p = bin.insert(r.h, r.w, heuristic);
+      if (p) used += p.w*p.h;
+    }
+    if (used <= 0) continue;
+    const m = sheetMetric(used, sc.w*sc.h, rule, alpha);
+    if (m > best) best = m;
+  }
+  return best === -Infinity ? 0 : best;
+}
+
+/** ---------------------------
+ *  Float greedy packing with sheet-choice + Lookahead
+ * --------------------------- */
+function packFloatGreedy(rects, sheetChoices, trimX, trimY, allowRotate, cfg){
+  const heuristic = cfg.heuristic;    // BSSF/BLSF/BAF
+  const sheetRule = cfg.sheetRule;    // used/ratio/hybrid
+  const alpha = cfg.alpha ?? 0.06;
+  const lookaheadW = cfg.lookaheadW ?? 0; // 0..1
+
+  let remaining = rects.slice();
+  const unplaceable = [];
+  const placedSheets = [];
+
+  const fitsAny = (r) => sheetChoices.some(sc => {
+    const uw = sc.w - 2*trimX, uh = sc.h - 2*trimY;
+    if (uw<=0 || uh<=0) return false;
+    return (uw>=r.w && uh>=r.h) || (allowRotate && uw>=r.h && uh>=r.w);
+  });
+  const filtered = [];
+  for (const r of remaining){ fitsAny(r) ? filtered.push(r) : unplaceable.push(r); }
+  remaining = filtered;
+
+  while (remaining.length){
+    let bestChoice = null;
+
+    for (const sc of sheetChoices){
+      const usableW = sc.w - 2*trimX, usableH = sc.h - 2*trimY;
+      if (usableW<=0 || usableH<=0) continue;
+
+      // simulate placement and also capture what would be placed
+      const bin = new MaxRectsBin(usableW, usableH);
+      let used = 0;
+      const placedIds = new Set();
+
+      for (const r of remaining){
+        let p = bin.insert(r.w, r.h, heuristic);
+        let rotated = false;
+        if (!p && allowRotate && r.w!==r.h){
+          const p2 = bin.insert(r.h, r.w, heuristic);
+          if (p2){ p = p2; rotated = true; }
+        }
+        if (p){
+          used += p.w*p.h;
+          placedIds.add(r.id);
+        }
+      }
+      if (used <= 0) continue;
+
+      const base = sheetMetric(used, sc.w*sc.h, sheetRule, alpha);
+
+      // 1-step lookahead: estimate best next metric after removing placed
+      let combined = base;
+      if (lookaheadW > 0){
+        const rem2 = remaining.filter(r => !placedIds.has(r.id));
+        const next = bestNextMetricFloat(rem2, sheetChoices, trimX, trimY, allowRotate, heuristic, sheetRule, alpha);
+        combined = base + lookaheadW * next;
+      }
+
+      if (!bestChoice || combined > bestChoice.combined){
+        bestChoice = {sc, usableW, usableH, combined};
+      }
+    }
+
+    if (!bestChoice){
+      for (const r of remaining) unplaceable.push(r);
+      break;
+    }
+
+    // pack for real on chosen sheet
+    const bin = new MaxRectsBin(bestChoice.usableW, bestChoice.usableH);
+    const placed = [];
+    const placedIds = new Set();
+
+    for (const r of remaining){
+      let p = bin.insert(r.w, r.h, heuristic);
+      let rotated = false;
+      if (!p && allowRotate && r.w!==r.h){
+        const p2 = bin.insert(r.h, r.w, heuristic);
+        if (p2){ p = p2; rotated = true; }
+      }
+      if (p){
+        placed.push({id:r.id, name:r.name, x:p.x+trimX, y:p.y+trimY, w:p.w, h:p.h, rotated});
+        placedIds.add(r.id);
+      }
+    }
+
+    remaining = remaining.filter(r => !placedIds.has(r.id));
+
+    placedSheets.push({
+      width: bestChoice.sc.w, height: bestChoice.sc.h,
+      trimX, trimY,
+      usableWidth: bestChoice.usableW, usableHeight: bestChoice.usableH,
+      used: bin.usedArea(),
+      placed
+    });
+  }
+
+  return {sheets: placedSheets, unplaceable};
+}
+
+/** ---------------------------
+ *  VSG greedy packing with sheet-choice + Lookahead (Guillotine)
+ * --------------------------- */
+function packVsgGreedy(rects, sheetChoices, allowRotate, cfg){
+  const heuristic = cfg.heuristic;    // BSSF/BLSF/BAF
+  const splitRule = cfg.splitRule;    // shorter/longer/horizontal/vertical
+  const sheetRule = cfg.sheetRule;    // used/ratio/hybrid
+  const alpha = cfg.alpha ?? 0.06;
+  const lookaheadW = cfg.lookaheadW ?? 0;
+
+  let remaining = rects.slice();
+  const unplaceable = [];
+  const placedSheets = [];
+
+  const fitsAny = (r) => sheetChoices.some(sc =>
+    (sc.w>=r.w && sc.h>=r.h) || (allowRotate && sc.w>=r.h && sc.h>=r.w)
+  );
+  const filtered = [];
+  for (const r of remaining){ fitsAny(r) ? filtered.push(r) : unplaceable.push(r); }
+  remaining = filtered;
+
+  while (remaining.length){
+    let bestChoice = null;
+
+    for (const sc of sheetChoices){
+      const bin = new GuillotineBin(sc.w, sc.h, splitRule);
+      let used = 0;
+      const placedIds = new Set();
+
+      for (const r of remaining){
+        let p = bin.insert(r.w, r.h, heuristic);
+        if (!p && allowRotate && r.w!==r.h) p = bin.insert(r.h, r.w, heuristic);
+        if (p){
+          used += p.w*p.h;
+          placedIds.add(r.id);
+        }
+      }
+      if (used <= 0) continue;
+
+      const base = sheetMetric(used, sc.w*sc.h, sheetRule, alpha);
+
+      let combined = base;
+      if (lookaheadW > 0){
+        const rem2 = remaining.filter(r => !placedIds.has(r.id));
+        const next = bestNextMetricVsg(rem2, sheetChoices, allowRotate, heuristic, splitRule, sheetRule, alpha);
+        combined = base + lookaheadW * next;
+      }
+
+      if (!bestChoice || combined > bestChoice.combined){
+        bestChoice = {sc, combined};
+      }
+    }
+
+    if (!bestChoice){
+      for (const r of remaining) unplaceable.push(r);
+      break;
+    }
+
+    const bin = new GuillotineBin(bestChoice.sc.w, bestChoice.sc.h, splitRule);
+    const placed = [];
+    const placedIds = new Set();
+
+    for (const r of remaining){
+      let p = bin.insert(r.w, r.h, heuristic);
+      let rotated = false;
+      if (!p && allowRotate && r.w!==r.h){
+        const p2 = bin.insert(r.h, r.w, heuristic);
+        if (p2){ p=p2; rotated=true; }
+      }
+      if (p){
+        placed.push({id:r.id, name:r.name, x:p.x, y:p.y, w:p.w, h:p.h, rotated});
+        placedIds.add(r.id);
+      }
+    }
+
+    remaining = remaining.filter(r => !placedIds.has(r.id));
+
+    placedSheets.push({
+      width: bestChoice.sc.w, height: bestChoice.sc.h,
+      trimX: 0, trimY: 0,
+      usableWidth: bestChoice.sc.w, usableHeight: bestChoice.sc.h,
+      used: bin.usedArea(),
+      placed
+    });
+  }
+
+  return {sheets: placedSheets, unplaceable};
+}
+
+/** ---------------------------
+ *  Multi-start optimizer (with Lookahead weight by quality)
+ * --------------------------- */
+function qualityBudgetMs(){
+  const q = $('quality').value;
+  if (q === "veryhigh") return 3000;
+  if (q === "high") return 1200;
+  return 400;
+}
+function lookaheadWeight(){
+  const q = $('quality').value;
+  if (q === "veryhigh") return 0.45;
+  if (q === "high") return 0.25;
+  return 0.0;
+}
+
+function optimizeHighQuality(rects, mode, sheetChoices, trimX, trimY, allowRotate, keepTogether){
+  const start = performance.now();
+  const budget = qualityBudgetMs();
+  const laW = lookaheadWeight();
+
+  const heuristics = ["BSSF","BLSF","BAF"];
+  const orders = ["area","maxside","height","perimeter","random"];
+  const sheetRules = ["used","hybrid","ratio"];
+  const alphas = [0.04, 0.06, 0.08];
+  const splitRules = ["shorter","longer","horizontal","vertical"]; // VSG
+
+  let best = null;       // {packed, cfg}
+  let bestScoreObj = null;
+  let attempts = 0;
+
+  let seedBase = Math.floor((Date.now() % 1e9) ^ (rects.length * 2654435761));
+
+  outer:
+  for (let s=0; ; s++){
+    if (performance.now() - start > budget) break;
+    const rng = mulberry32(seedBase + s*99991);
+
+    for (const ord of orders){
+      for (const heu of heuristics){
+        for (const rule of sheetRules){
+          const alpha = alphas[(s + ord.length + heu.length) % alphas.length];
+
+          if (performance.now() - start > budget) break outer;
+
+          let ordered = orderRects(rects, ord, rng);
+          if (keepTogether) ordered = reorderKeepTogether(ordered, rng);
+
+          if (mode === "float"){
+            const packed = packFloatGreedy(ordered, sheetChoices, trimX, trimY, allowRotate, {
+              heuristic: heu, sheetRule: rule, alpha, lookaheadW: laW
+            });
+            attempts++;
+            const sc = scorePlan(packed.sheets);
+            if (betterScore(sc, bestScoreObj)){
+              bestScoreObj = sc;
+              best = {packed, cfg:{ord, heu, rule, alpha, lookaheadW: laW}};
+            }
+          } else {
+            for (const sr of splitRules){
+              if (performance.now() - start > budget) break outer;
+
+              const packed = packVsgGreedy(ordered, sheetChoices, allowRotate, {
+                heuristic: heu, splitRule: sr, sheetRule: rule, alpha, lookaheadW: laW
+              });
+              attempts++;
+              const sc = scorePlan(packed.sheets);
+              if (betterScore(sc, bestScoreObj)){
+                bestScoreObj = sc;
+                best = {packed, cfg:{ord, heu, rule, alpha, splitRule: sr, lookaheadW: laW}};
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  if (!best){
+    return {packed:{sheets:[], unplaceable:rects.slice()}, cfg:{note:"no solution"}, attempts};
+  }
+  return {packed: best.packed, cfg: best.cfg, attempts};
+}
+
+/** ---------------------------
+ *  Build plan
+ * --------------------------- */
+let currentPlan = null;
+let currentIndex = 0;
+
+function buildAndOptimize(){
+  const mode = $('glassMode').value;           // float|vsg
+  const allowRotate = $('allowRotate').value === "1";
+  const keepTogether = $('keepTogether').checked;
+
+  const sheetChoicesRaw = parseSheetList($('sheetList').value);
+  if (!sheetChoicesRaw.length){
+    alert("Bitte mindestens ein gültiges Tafelmaß in der Tafelliste angeben (z.B. 3210x2250).");
+    return;
+  }
+
+  let trimX = 0, trimY = 0;
+  if (mode === "float"){
+    trimX = Math.floor(Number($('trimX').value));
+    trimY = Math.floor(Number($('trimY').value));
+  }
+
+  let sheetChoices = sheetChoicesRaw.slice();
+  if (mode === "float"){
+    sheetChoices = sheetChoices.filter(sc => (sc.w - 2*trimX) > 0 && (sc.h - 2*trimY) > 0);
+    if (!sheetChoices.length){
+      alert("Randschnitt ist zu groß – bei keinem Tafelmaß bleibt eine positive Nutzfläche übrig.");
+      return;
+    }
+  }
+
+  const items = getCutsFromUI();
+  if (!items.length){
+    alert("Bitte mindestens einen Zuschnitt eingeben.");
+    return;
+  }
+  const rects = expandCuts(items);
+
+  const t0 = performance.now();
+  const {packed, cfg, attempts} = optimizeHighQuality(rects, mode, sheetChoices, trimX, trimY, allowRotate, keepTogether);
+  const t1 = performance.now();
+
+  const totals = scorePlan(packed.sheets);
+
+  currentPlan = {
+    meta: {
+      createdAt: new Date().toISOString(),
+      mode,
+      allowRotate,
+      keepTogether,
+      algorithm: mode === "vsg" ? "Guillotine Multi-Start (Lookahead)" : "MaxRects Multi-Start (Lookahead)",
+      bestConfig: cfg,
+      attempts,
+      runtime_ms: Math.round(t1 - t0),
+      lookaheadWeight: cfg?.lookaheadW ?? 0,
+      units: "mm",
+      trimIsBothSides: true,
+      kerf: 0
+    },
+    input: {
+      sheetChoices,
+      trimX, trimY,
+      cuts: items
+    },
+    sheets: packed.sheets,
+    unplaceable: packed.unplaceable,
+    totals: {
+      sheets: packed.sheets.length,
+      used_mm2: totals.usedArea,
+      sheet_mm2: totals.totalArea,
+      waste_mm2: totals.waste
+    }
+  };
+
+  currentIndex = 0;
+  updateUI();
+}
+
+/** ---------------------------
+ *  Canvas render
+ * --------------------------- */
+const cnv = $('cnv');
+const ctx = cnv.getContext('2d');
+
+function renderSheet(plan, idx){
+  const sh = plan.sheets[idx];
+  const sheetW = sh.width, sheetH = sh.height;
+  const trimX = sh.trimX, trimY = sh.trimY;
+
+  ctx.clearRect(0,0,cnv.width,cnv.height);
+  const pad = 18;
+  const drawW = cnv.width - pad*2;
+  const drawH = cnv.height - pad*2;
+
+  let scale;
+  if ($('canvasScaleMode').value === "1"){
+    scale = 1;
+    if (sheetW > drawW || sheetH > drawH) scale = Math.min(drawW / sheetW, drawH / sheetH);
+  } else {
+    scale = Math.min(drawW / sheetW, drawH / sheetH);
+  }
+  scale = clamp(scale, 0.05, 10);
+
+  const ox = pad + (drawW - sheetW*scale)/2;
+  const oy = pad + (drawH - sheetH*scale)/2;
+
+  ctx.save();
+  ctx.fillStyle = "#06090e";
+  ctx.fillRect(0,0,cnv.width,cnv.height);
+
+  ctx.strokeStyle = "#2b3a52";
+  ctx.lineWidth = 2;
+  ctx.strokeRect(ox, oy, sheetW*scale, sheetH*scale);
+
+  const showTrim = $('showTrim').value === "1";
+  if (showTrim && (trimX>0 || trimY>0)){
+    const iw = sheetW - 2*trimX;
+    const ih = sheetH - 2*trimY;
+    ctx.fillStyle = "rgba(94,234,212,0.06)";
+    ctx.strokeStyle = "rgba(94,234,212,0.35)";
+    ctx.lineWidth = 1.5;
+    ctx.fillRect(ox + trimX*scale, oy + trimY*scale, iw*scale, ih*scale);
+    ctx.strokeRect(ox + trimX*scale, oy + trimY*scale, iw*scale, ih*scale);
+  }
+
+  for (const p of sh.placed){
+    const x = ox + p.x*scale;
+    const y = oy + p.y*scale;
+    const w = p.w*scale;
+    const h = p.h*scale;
+
+    const hue = hashHue(p.name);
+    ctx.fillStyle = `hsla(${hue}, 70%, 55%, 0.22)`;
+    ctx.strokeStyle = `hsla(${hue}, 70%, 65%, 0.65)`;
+    ctx.lineWidth = 1.2;
+    ctx.fillRect(x,y,w,h);
+    ctx.strokeRect(x,y,w,h);
+
+    ctx.fillStyle = "rgba(232,240,250,0.92)";
+    const fontSize = Math.max(10, Math.min(16, 0.18*Math.min(w,h)));
+    ctx.font = `${fontSize}px system-ui`;
+    const label = `${p.name} ${Math.round(p.w)}×${Math.round(p.h)}${p.rotated ? " (R)" : ""}`;
+    ctx.save();
+    ctx.beginPath(); ctx.rect(x,y,w,h); ctx.clip();
+    ctx.fillText(label, x+4, y+fontSize+2);
+    ctx.restore();
+  }
+
+  ctx.fillStyle = "rgba(145,164,183,0.9)";
+  ctx.font = "12px system-ui";
+  const mode = plan.meta.mode === "vsg" ? "VSG" : "Float";
+  ctx.fillText(`Tafel ${idx+1}/${plan.sheets.length} — ${mode} — Format: ${sheetW}×${sheetH} mm`, 14, cnv.height - 12);
+
+  ctx.restore();
+}
+
+/** ---------------------------
+ *  UI Update
+ * --------------------------- */
+function updateUI(){
+  if (!currentPlan){
+    $('summaryLine').textContent = "Noch nicht optimiert.";
+    $('statsPills').innerHTML = "";
+    $('report').innerHTML = "";
+    ctx.clearRect(0,0,cnv.width,cnv.height);
+    return;
+  }
+
+  const p = currentPlan;
+  const used_m2 = mm2_to_m2(p.totals.used_mm2);
+  const waste_m2 = mm2_to_m2(p.totals.waste_mm2);
+  const yieldPct = p.totals.sheet_mm2 > 0 ? (p.totals.used_mm2 / p.totals.sheet_mm2 * 100) : 0;
+
+  $('summaryLine').textContent =
+    `Tafeln: ${p.totals.sheets} · Nutzung: ${fmt(used_m2,2)} m² · Verschnitt: ${fmt(waste_m2,2)} m² · Ausbeute: ${fmt(yieldPct,1)}% · Läufe: ${p.meta.attempts} · ${p.meta.runtime_ms} ms · Lookahead: ${fmt(p.meta.lookaheadWeight,2)}`;
+
+  const sh = p.sheets[currentIndex];
+  const sheetArea_m2 = mm2_to_m2(sh.width*sh.height);
+  const usedSheet_m2 = mm2_to_m2(sh.used);
+  const wasteSheet_m2 = sheetArea_m2 - usedSheet_m2;
+  const yieldSheet = (sh.used / (sh.width*sh.height) * 100);
+
+  $('statsPills').innerHTML = "";
+  const pills = [
+    `Modus: ${p.meta.mode === "vsg" ? "VSG" : "Floatglas"}`,
+    `Aktuelle Tafel: ${currentIndex+1}/${p.sheets.length}`,
+    `Format: ${sh.width}×${sh.height} mm`,
+    `Nutzfläche: ${sh.usableWidth}×${sh.usableHeight} mm`,
+    `Randschnitt: X=${sh.trimX} / Y=${sh.trimY} mm (pro Seite)`,
+    `Tafel Ausbeute: ${fmt(yieldSheet,1)}%`,
+    `Tafel Nutzung: ${fmt(usedSheet_m2,2)} m²`,
+    `Tafel Verschnitt: ${fmt(wasteSheet_m2,2)} m²`,
+    `Platziert: ${sh.placed.length} Teile`
+  ];
+  for (const t of pills){
+    const el = document.createElement('div');
+    el.className = "pill";
+    el.textContent = t;
+    $('statsPills').appendChild(el);
+  }
+
+  const counts = formatCounts(p.sheets);
+  const countsHtml = counts.length
+    ? `<div style="margin-top:8px;"><b>Verwendete Tafel-Formate:</b><br>${counts.map(([k,c])=>`${k} mm: ${c}×`).join(" · ")}</div>`
+    : "";
+
+  const up = p.unplaceable || [];
+  const unpText = up.length
+    ? `<div style="margin-top:8px;"><b>Nicht platzierbar (${up.length}):</b><br>${up.slice(0,80).map(r=>`${escapeHtml(r.name)} (${r.w}×${r.h})`).join(", ")}${up.length>80?" …":""}</div>`
+    : `<div style="margin-top:8px;"><b>Alle Teile platziert.</b></div>`;
+
+  const cfg = p.meta.bestConfig || {};
+  const cfgLine = p.meta.mode === "vsg"
+    ? `Order=${cfg.ord}, Heu=${cfg.heu}, Split=${cfg.splitRule}, SheetRule=${cfg.rule}, α=${cfg.alpha}, LA=${fmt(cfg.lookaheadW||0,2)}`
+    : `Order=${cfg.ord}, Heu=${cfg.heu}, SheetRule=${cfg.rule}, α=${cfg.alpha}, LA=${fmt(cfg.lookaheadW||0,2)}`;
+
+  $('report').innerHTML = `
+    <div><b>Optimizer:</b> ${escapeHtml(p.meta.algorithm)} · ${p.meta.mode.toUpperCase()} · Rotation: ${p.meta.allowRotate ? "Ja" : "Nein"}</div>
+    <div><b>Positionen zusammenhalten:</b> ${p.meta.keepTogether ? "Ja (kann Ausbeute reduzieren)" : "Nein (Standard, beste Ausnutzung)"}</div>
+    <div><b>Beste Konfiguration:</b> ${escapeHtml(cfgLine)}</div>
+    <div><b>Tafelliste:</b> ${p.input.sheetChoices.map(sc=>`${sc.w}x${sc.h}`).join(", ")}</div>
+    <div><b>Randschnitt:</b> ${p.meta.mode==="vsg" ? "VSG: 0" : `Float: beidseitig (X=${p.input.trimX}, Y=${p.input.trimY})`}</div>
+    ${countsHtml}
+    ${unpText}
+  `;
+
+  renderSheet(p, currentIndex);
+}
+
+/** ---------------------------
+ *  CSV / JSON import export
+ * --------------------------- */
+function exportCutsCSV(){
+  const items = getCutsFromUI();
+  const lines = ["Name,Breite_mm,Höhe_mm,Menge"];
+  for (const it of items){
+    const name = `"${String(it.name).replaceAll('"','""')}"`;
+    lines.push([name, it.w, it.h, it.qty].join(","));
+  }
+  downloadBlob("zuschnitte.csv", new Blob([lines.join("\n")], {type:"text/csv;charset=utf-8"}));
+}
+function exportPlanJSON(){
+  if (!currentPlan){ alert("Bitte zuerst optimieren."); return; }
+  downloadBlob("zuschnitt-plan.json", new Blob([JSON.stringify(currentPlan, null, 2)], {type:"application/json"}));
+}
+function parseCSVLine(line){
+  const out=[]; let cur="", inQ=false;
+  for (let i=0;i<line.length;i++){
+    const ch=line[i];
+    if (ch === '"'){
+      if (inQ && line[i+1] === '"'){ cur+='"'; i++; } else inQ=!inQ;
+    } else if (ch === ',' && !inQ){ out.push(cur.trim()); cur=""; }
+    else cur+=ch;
+  }
+  out.push(cur.trim());
+  return out.map(s=> (s.startsWith('"') && s.endsWith('"')) ? s.slice(1,-1).replaceAll('""','"') : s);
+}
+async function importCSV(file){
+  const txt = await readFileAsText(file);
+  const lines = txt.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+  if (!lines.length) return;
+  const rows=[];
+  for (let i=0;i<lines.length;i++){
+    const line=lines[i];
+    if (i===0 && /name/i.test(line) && /breite/i.test(line)) continue;
+    const parts=parseCSVLine(line);
+    if (parts.length<4) continue;
+    const name=parts[0], w=Number(parts[1]), h=Number(parts[2]), qty=Number(parts[3]);
+    if (Number.isFinite(w)&&Number.isFinite(h)&&Number.isFinite(qty)) rows.push({name, w:Math.floor(w), h:Math.floor(h), qty:Math.floor(qty)});
+  }
+  if (!rows.length){ alert("CSV konnte nicht gelesen werden. Erwartet: Name,Breite,Höhe,Menge"); return; }
+  cutsTbody.innerHTML=""; for (const r of rows) addCutRow(r);
+}
+async function importJSON(file){
+  const txt = await readFileAsText(file);
+  let obj; try{ obj=JSON.parse(txt); } catch(e){ alert("Ungültiges JSON."); return; }
+
+  if (obj && obj.input && obj.input.cuts && obj.sheets){
+    currentPlan=obj; currentIndex=0;
+    const sc=obj.input.sheetChoices||[];
+    if (Array.isArray(sc) && sc.length) $('sheetList').value = sc.map(s=>`${s.w}x${s.h}`).join("\n");
+    $('glassMode').value = obj.meta?.mode || "float";
+    $('allowRotate').value = obj.meta?.allowRotate ? "1" : "0";
+    $('keepTogether').checked = !!obj.meta?.keepTogether;
+    $('trimX').value = obj.input.trimX ?? 0;
+    $('trimY').value = obj.input.trimY ?? 0;
+    applyModeUI();
+    cutsTbody.innerHTML=""; for (const c of obj.input.cuts) addCutRow(c);
+    updateUI(); return;
+  }
+
+  if (Array.isArray(obj)){
+    cutsTbody.innerHTML="";
+    for (const c of obj){
+      if (!c) continue;
+      const name = c.name ?? c.Name ?? "";
+      const w = c.w ?? c.width ?? c.Breite ?? c.breite;
+      const h = c.h ?? c.height ?? c.Höhe ?? c.hoehe ?? c.höhe;
+      const qty = c.qty ?? c.menge ?? c.Menge ?? 1;
+      if (Number(w)>0 && Number(h)>0) addCutRow({name, w, h, qty});
+    }
+    return;
+  }
+  alert("JSON Format unbekannt. Erwartet: Plan-JSON oder Array von Zuschnitten.");
+}
+
+/** ---------------------------
+ *  PNG / PDF Export
+ * --------------------------- */
+function exportPNGCurrent(){
+  if (!currentPlan){ alert("Bitte zuerst optimieren."); return; }
+  const sh = currentPlan.sheets[currentIndex];
+  const a=document.createElement('a');
+  a.download=`tafel-${currentIndex+1}_${sh.width}x${sh.height}_${currentPlan.meta.mode}.png`;
+  a.href=cnv.toDataURL("image/png"); a.click();
+}
+async function exportPDFAll(){
+  if (!currentPlan){ alert("Bitte zuerst optimieren."); return; }
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({orientation:"landscape", unit:"pt", format:"a4"});
+  const prevIndex=currentIndex;
+
+  for (let i=0;i<currentPlan.sheets.length;i++){
+    if (i>0) pdf.addPage();
+    currentIndex=i;
+    renderSheet(currentPlan, currentIndex);
+    const img = cnv.toDataURL("image/png");
+
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const s = Math.min((pageW-40)/cnv.width, (pageH-40)/cnv.height);
+    const w = cnv.width*s, h = cnv.height*s;
+    pdf.addImage(img, "PNG", (pageW-w)/2, (pageH-h)/2, w, h);
+
+    const sh=currentPlan.sheets[i];
+    pdf.setFontSize(10);
+    pdf.text(`Tafel ${i+1}/${currentPlan.sheets.length} — ${currentPlan.meta.mode.toUpperCase()} — Format ${sh.width}x${sh.height} mm`, 24, 24);
+  }
+  currentIndex=prevIndex;
+  pdf.save("zuschnitt-tafeln.pdf");
+  updateUI();
+}
+
+/** ---------------------------
+ *  Mode UI
+ * --------------------------- */
+function applyModeUI(){
+  const mode = $('glassMode').value;
+  const isVsg = mode === "vsg";
+  $('trimX').disabled = isVsg;
+  $('trimY').disabled = isVsg;
+
+  if (isVsg){
+    $('trimX').value = 0;
+    $('trimY').value = 0;
+    $('showTrim').value = "0";
+    $('modeHint').textContent = "VSG: kein Randschnitt + Guillotine (keine Z-Schnitte). Lookahead aktiv je nach Qualitätsstufe.";
+  } else {
+    $('modeHint').textContent = "Float: beidseitiger Randschnitt + MaxRects. Lookahead aktiv je nach Qualitätsstufe.";
+  }
+
+  if (currentPlan) updateUI();
+}
+
+/** ---------------------------
+ *  Wire up
+ * --------------------------- */
+$('glassMode').addEventListener('change', applyModeUI);
+$('showTrim').addEventListener('change', () => { if (currentPlan) updateUI(); });
+$('canvasScaleMode').addEventListener('change', () => { if (currentPlan) updateUI(); });
+
+$('addRowBtn').addEventListener('click', () => addCutRow({name:"", w:500, h:300, qty:1}));
+$('fillDemoBtn').addEventListener('click', () => {
+  cutsTbody.innerHTML="";
+  addCutRow({name:"Pos10", w:1200, h:800, qty:2});
+  addCutRow({name:"Pos20", w:900, h:700, qty:3});
+  addCutRow({name:"Pos30", w:600, h:400, qty:6});
+  addCutRow({name:"Pos40", w:450, h:350, qty:8});
+  addCutRow({name:"Pos50", w:300, h:250, qty:10});
+});
+$('clearBtn').addEventListener('click', () => { cutsTbody.innerHTML=""; currentPlan=null; updateUI(); });
+
+$('optBtn').addEventListener('click', buildAndOptimize);
+$('resetViewBtn').addEventListener('click', () => { currentIndex=0; updateUI(); });
+
+$('prevSheetBtn').addEventListener('click', () => {
+  if (!currentPlan) return;
+  currentIndex = (currentIndex - 1 + currentPlan.sheets.length) % currentPlan.sheets.length;
+  updateUI();
+});
+$('nextSheetBtn').addEventListener('click', () => {
+  if (!currentPlan) return;
+  currentIndex = (currentIndex + 1) % currentPlan.sheets.length;
+  updateUI();
+});
+
+$('exportCSV').addEventListener('click', exportCutsCSV);
+$('exportJSON').addEventListener('click', exportPlanJSON);
+
+$('csvFile').addEventListener('change', async (e) => {
+  const f = e.target.files?.[0]; if (!f) return;
+  try { await importCSV(f); } catch(err){ alert("CSV Import fehlgeschlagen."); console.error(err); }
+  e.target.value="";
+});
+$('jsonFile').addEventListener('change', async (e) => {
+  const f = e.target.files?.[0]; if (!f) return;
+  try { await importJSON(f); } catch(err){ alert("JSON Import fehlgeschlagen."); console.error(err); }
+  e.target.value="";
+});
+
+$('pngBtn').addEventListener('click', exportPNGCurrent);
+$('pdfBtn').addEventListener('click', exportPDFAll);
+
+// init
+addCutRow({name:"Pos10", w:1000, h:500, qty:1});
+addCutRow({name:"Pos20", w:800, h:600, qty:2});
+applyModeUI();
+updateUI();
+</script>
+</body>
+</html>
