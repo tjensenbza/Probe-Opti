@@ -12,7 +12,7 @@
     header{ padding:18px 18px 8px; max-width:1200px; margin:0 auto; }
     h1{ font-size:18px; margin:0 0 6px; letter-spacing:.2px; }
     .sub{ color:var(--muted); font-size:13px; line-height:1.3; }
-    main{ max-width:1200px; margin:0 auto; padding:12px 18px 28px; display:grid; gap:12px; grid-template-columns: 520px 1fr; }
+    main{ max-width:1200px; margin:0 auto; padding:12px 18px 28px; display:grid; gap:12px; grid-template-columns: 560px 1fr; }
     @media (max-width: 980px){ main{ grid-template-columns: 1fr; } }
     .card{ background:rgba(18,26,36,.92); border:1px solid var(--line); border-radius:14px; padding:14px; box-shadow:0 10px 30px rgba(0,0,0,.25); }
     .card h2{ font-size:14px; margin:0 0 10px; color:#cfe3ff; }
@@ -59,8 +59,7 @@
   <h1>Zuschnitt-Optimierung – Tafelliste + Float/VSG + High-Quality (Lookahead + Traversen)</h1>
   <div class="sub">
     Primär: <b>maximale Materialnutzung / minimaler Verschnitt</b>. Rotation standard <b>AN</b>.
-    Optional: <b>Traversen bevorzugen</b> (nur als Tie-Break, verschlechtert nicht den Verschnitt).
-    <b>Traversen laufen immer entlang der kurzen Kante</b>.
+    Traversen können <b>AN/AUS</b> geschaltet werden und (wenn AN) mit <b>X</b> oder <b>Y</b>-Ausrichtung bewertet werden (Tie-Break, verschlechtert nicht den Verschnitt).
     “Positionen zusammenhalten” ist <b>AUS</b> (nur wenn ausdrücklich gewählt).
   </div>
 </header>
@@ -104,13 +103,14 @@
       </div>
     </div>
 
+    <!-- TraversEN: nur zwei Optionen AN/AUS -->
     <div class="row3" style="margin-bottom:10px;">
-      <div class="chk" title="Traversen werden nur als Tie-Break bevorzugt (Verschnitt bleibt Priorität #1). Traversen laufen immer entlang der kurzen Kante.">
-        <input id="preferTraverses" type="checkbox" checked />
-        <div>
-          <div style="font-weight:700; font-size:13px;">Traversen bevorzugen</div>
-          <div class="muted">nur bei gleichem Verschnitt</div>
-        </div>
+      <div>
+        <label>Traversen</label>
+        <select id="traverseMode" title="Traversen werden nur als Tie-Break berücksichtigt (bei gleichem Verschnitt).">
+          <option value="on" selected>Traversen AN</option>
+          <option value="off">Traversen AUS</option>
+        </select>
       </div>
       <div>
         <label>Min. Traversenbreite (mm)</label>
@@ -120,6 +120,17 @@
         <label>Max. Traversenbreite (mm)</label>
         <input id="maxTraverse" type="number" value="800" min="1" step="1">
       </div>
+    </div>
+
+    <div class="row" style="margin-bottom:10px;">
+      <div>
+        <label>Traversen-Ausrichtung (Bewertung)</label>
+        <select id="traverseAxis" title="X = horizontaler Streifen (spannt Nutzbreite). Y = vertikaler Streifen (spannt Nutzhöhe).">
+          <option value="x" selected>X-Achse (horizontal)</option>
+          <option value="y">Y-Achse (vertikal)</option>
+        </select>
+      </div>
+      <div></div>
     </div>
 
     <div>
@@ -157,7 +168,7 @@
     </div>
 
     <div class="hint" style="margin-top:12px;" id="modeHint">
-      Lookahead: Tafelauswahl schaut 1 Schritt voraus. Traversen: bevorzugt Reststreifen entlang der kurzen Kante (Tie-Break).
+      Lookahead: Tafelauswahl schaut 1 Schritt voraus. Traversen (wenn AN): Tie-Break nach X/Y-Ausrichtung und Min/Max Breite.
     </div>
 
     <div class="hr"></div>
@@ -296,6 +307,20 @@ function hashHue(str){
 }
 
 /** ---------------------------
+ *  Traverse UI enable/disable
+ * --------------------------- */
+function applyTraverseUI(){
+  const on = $('traverseMode').value === "on";
+  $('minTraverse').disabled = !on;
+  $('maxTraverse').disabled = !on;
+  $('traverseAxis').disabled = !on;
+}
+$('traverseMode').addEventListener('change', () => {
+  applyTraverseUI();
+  if (currentPlan) updateUI();
+});
+
+/** ---------------------------
  *  UI: Cuts table
  * --------------------------- */
 const cutsTbody = $('cutsTable').querySelector('tbody');
@@ -373,28 +398,28 @@ function formatCounts(sheets){
 
 /** ---------------------------
  *  Traversen Scoring (Tie-Break)
- *  - Traversen laufen IMMER entlang der kurzen Kante (Nutzfläche)
- *  - Streifenstärke muss zwischen minStrip und maxStrip liegen
+ *  axisMode:
+ *    - "x": horizontaler Streifen (spannt Nutzbreite), Dicke = r.h
+ *    - "y": vertikaler Streifen (spannt Nutzhöhe), Dicke = r.w
+ *  thickness muss zwischen minStrip und maxStrip liegen
  * --------------------------- */
-function traverseScoreForSheet(sheet, minStrip = 120, maxStrip = 800, coverage = 0.80){
+function traverseScoreForSheet(sheet, axisMode = "x", minStrip = 120, maxStrip = 800, coverage = 0.80){
   const usableW = sheet.usableWidth;
   const usableH = sheet.usableHeight;
   const free = sheet.free || [];
-
-  const shortIsWidth = usableW <= usableH; // kurze Kante ist Breite => Traverse horizontal (spannt Breite)
   let score = 0; // mm²
 
   for (const r of free){
-    if (shortIsWidth){
-      const spansShort = (r.w >= usableW * coverage);
+    if (axisMode === "x"){
+      const spans = (r.w >= usableW * coverage);
       const thickness = r.h;
-      if (spansShort && thickness >= minStrip && thickness <= maxStrip){
+      if (spans && thickness >= minStrip && thickness <= maxStrip){
         score += r.w * r.h;
       }
-    } else {
-      const spansShort = (r.h >= usableH * coverage);
+    } else { // "y"
+      const spans = (r.h >= usableH * coverage);
       const thickness = r.w;
-      if (spansShort && thickness >= minStrip && thickness <= maxStrip){
+      if (spans && thickness >= minStrip && thickness <= maxStrip){
         score += r.w * r.h;
       }
     }
@@ -405,14 +430,14 @@ function traverseScoreForSheet(sheet, minStrip = 120, maxStrip = 800, coverage =
 /** ---------------------------
  *  Objective / Scoring (waste -> totalArea -> traverse -> sheetCount)
  * --------------------------- */
-function scorePlan(sheets, preferTraverses, minStrip, maxStrip){
+function scorePlan(sheets, preferTraverses, traverseAxis, minStrip, maxStrip){
   const totalArea = sheets.reduce((s,sh)=>s + sh.width*sh.height, 0);
   const usedArea  = sheets.reduce((s,sh)=>s + sh.used, 0);
   const waste     = totalArea - usedArea;
   const n         = sheets.length;
 
   const traverse = preferTraverses
-    ? sheets.reduce((s,sh)=> s + traverseScoreForSheet(sh, minStrip, maxStrip, 0.80), 0)
+    ? sheets.reduce((s,sh)=> s + traverseScoreForSheet(sh, traverseAxis, minStrip, maxStrip, 0.80), 0)
     : 0;
 
   return {waste, totalArea, n, usedArea, traverse};
@@ -806,6 +831,7 @@ function packFloatGreedy(rects, sheetChoices, trimX, trimY, allowRotate, cfg){
       usableWidth: bestChoice.usableW, usableHeight: bestChoice.usableH,
       used: bin.usedArea(),
       placed,
+      // freie Rest-Rechtecke in Tafel-Koordinaten (für Traversen-Scoring)
       free: bin.free.map(r => ({ x: r.x + trimX, y: r.y + trimY, w: r.w, h: r.h }))
     });
   }
@@ -922,7 +948,10 @@ function lookaheadWeight(){
   return 0.0;
 }
 
-function optimizeHighQuality(rects, mode, sheetChoices, trimX, trimY, allowRotate, keepTogether, preferTraverses, minTraverse, maxTraverse){
+function optimizeHighQuality(rects, mode, sheetChoices, trimX, trimY,
+  allowRotate, keepTogether,
+  preferTraverses, traverseAxis, minTraverse, maxTraverse
+){
   const start = performance.now();
   const budget = qualityBudgetMs();
   const laW = lookaheadWeight();
@@ -959,7 +988,7 @@ function optimizeHighQuality(rects, mode, sheetChoices, trimX, trimY, allowRotat
               heuristic: heu, sheetRule: rule, alpha, lookaheadW: laW
             });
             attempts++;
-            const sc = scorePlan(packed.sheets, preferTraverses, minTraverse, maxTraverse);
+            const sc = scorePlan(packed.sheets, preferTraverses, traverseAxis, minTraverse, maxTraverse);
             if (betterScore(sc, bestScoreObj)){
               bestScoreObj = sc;
               best = {packed, cfg:{ord, heu, rule, alpha, lookaheadW: laW}};
@@ -972,7 +1001,7 @@ function optimizeHighQuality(rects, mode, sheetChoices, trimX, trimY, allowRotat
                 heuristic: heu, splitRule: sr, sheetRule: rule, alpha, lookaheadW: laW
               });
               attempts++;
-              const sc = scorePlan(packed.sheets, preferTraverses, minTraverse, maxTraverse);
+              const sc = scorePlan(packed.sheets, preferTraverses, traverseAxis, minTraverse, maxTraverse);
               if (betterScore(sc, bestScoreObj)){
                 bestScoreObj = sc;
                 best = {packed, cfg:{ord, heu, rule, alpha, splitRule: sr, lookaheadW: laW}};
@@ -1000,7 +1029,9 @@ function buildAndOptimize(){
   const mode = $('glassMode').value;           // float|vsg
   const allowRotate = $('allowRotate').value === "1";
   const keepTogether = $('keepTogether').checked;
-  const preferTraverses = $('preferTraverses').checked;
+
+  const preferTraverses = $('traverseMode').value === "on";
+  const traverseAxis = $('traverseAxis').value; // "x" | "y"
 
   const minTraverse = Math.max(1, Math.floor(Number($('minTraverse').value) || 120));
   const maxTraverseRaw = Math.floor(Number($('maxTraverse').value) || 800);
@@ -1036,11 +1067,13 @@ function buildAndOptimize(){
 
   const t0 = performance.now();
   const {packed, cfg, attempts} = optimizeHighQuality(
-    rects, mode, sheetChoices, trimX, trimY, allowRotate, keepTogether, preferTraverses, minTraverse, maxTraverse
+    rects, mode, sheetChoices, trimX, trimY,
+    allowRotate, keepTogether,
+    preferTraverses, traverseAxis, minTraverse, maxTraverse
   );
   const t1 = performance.now();
 
-  const totals = scorePlan(packed.sheets, preferTraverses, minTraverse, maxTraverse);
+  const totals = scorePlan(packed.sheets, preferTraverses, traverseAxis, minTraverse, maxTraverse);
 
   currentPlan = {
     meta: {
@@ -1049,6 +1082,7 @@ function buildAndOptimize(){
       allowRotate,
       keepTogether,
       preferTraverses,
+      traverseAxis,
       minTraverse,
       maxTraverse,
       algorithm: mode === "vsg" ? "Guillotine Multi-Start (Lookahead)" : "MaxRects Multi-Start (Lookahead)",
@@ -1176,7 +1210,8 @@ function updateUI(){
   const yieldPct = p.totals.sheet_mm2 > 0 ? (p.totals.used_mm2 / p.totals.sheet_mm2 * 100) : 0;
 
   const trav_m2 = mm2_to_m2(p.totals.traverse_mm2 || 0);
-  const travTxt = p.meta.preferTraverses ? ` · Traversen: ${fmt(trav_m2,2)} m² (Tie-Break)` : "";
+  const axisLabel = p.meta.traverseAxis === "y" ? "Y (vertikal)" : "X (horizontal)";
+  const travTxt = p.meta.preferTraverses ? ` · Traversen: ${fmt(trav_m2,2)} m² (Tie-Break, ${axisLabel})` : "";
 
   $('summaryLine').textContent =
     `Tafeln: ${p.totals.sheets} · Nutzung: ${fmt(used_m2,2)} m² · Verschnitt: ${fmt(waste_m2,2)} m² · Ausbeute: ${fmt(yieldPct,1)}% · Läufe: ${p.meta.attempts} · ${p.meta.runtime_ms} ms · Lookahead: ${fmt(p.meta.lookaheadWeight,2)}${travTxt}`;
@@ -1222,8 +1257,8 @@ function updateUI(){
     : `Order=${cfg.ord}, Heu=${cfg.heu}, SheetRule=${cfg.rule}, α=${cfg.alpha}, LA=${fmt(cfg.lookaheadW||0,2)}`;
 
   const travLine = p.meta.preferTraverses
-    ? `<div><b>Traversen Tie-Break:</b> aktiv · kurz-Kante · Min=${p.meta.minTraverse} mm · Max=${p.meta.maxTraverse} mm · Gesamt=${fmt(mm2_to_m2(p.totals.traverse_mm2||0),2)} m²</div>`
-    : `<div><b>Traversen Tie-Break:</b> aus</div>`;
+    ? `<div><b>Traversen:</b> AN · Achse=${axisLabel} · Min=${p.meta.minTraverse} mm · Max=${p.meta.maxTraverse} mm · Gesamt=${fmt(mm2_to_m2(p.totals.traverse_mm2||0),2)} m²</div>`
+    : `<div><b>Traversen:</b> AUS</div>`;
 
   $('report').innerHTML = `
     <div><b>Optimizer:</b> ${escapeHtml(p.meta.algorithm)} · ${p.meta.mode.toUpperCase()} · Rotation: ${p.meta.allowRotate ? "Ja" : "Nein"}</div>
@@ -1294,12 +1329,19 @@ async function importJSON(file){
     $('glassMode').value = obj.meta?.mode || "float";
     $('allowRotate').value = obj.meta?.allowRotate ? "1" : "0";
     $('keepTogether').checked = !!obj.meta?.keepTogether;
-    $('preferTraverses').checked = obj.meta?.preferTraverses !== false;
+
+    const pref = obj.meta?.preferTraverses !== false; // default true if missing
+    $('traverseMode').value = pref ? "on" : "off";
+    $('traverseAxis').value = obj.meta?.traverseAxis ?? "x";
     $('minTraverse').value = obj.meta?.minTraverse ?? 120;
     $('maxTraverse').value = obj.meta?.maxTraverse ?? 800;
+
     $('trimX').value = obj.input.trimX ?? 0;
     $('trimY').value = obj.input.trimY ?? 0;
+
     applyModeUI();
+    applyTraverseUI();
+
     cutsTbody.innerHTML=""; for (const c of obj.input.cuts) addCutRow(c);
     updateUI(); return;
   }
@@ -1369,9 +1411,9 @@ function applyModeUI(){
     $('trimX').value = 0;
     $('trimY').value = 0;
     $('showTrim').value = "0";
-    $('modeHint').textContent = "VSG: kein Randschnitt + Guillotine (keine Z-Schnitte). Lookahead & Traversen-Tie-Break (kurze Kante) je nach Einstellung.";
+    $('modeHint').textContent = "VSG: kein Randschnitt + Guillotine (keine Z-Schnitte). Lookahead aktiv je nach Qualität. Traversen (wenn AN): Tie-Break nach X/Y und Min/Max Breite.";
   } else {
-    $('modeHint').textContent = "Float: beidseitiger Randschnitt + MaxRects. Lookahead & Traversen-Tie-Break (kurze Kante) je nach Einstellung.";
+    $('modeHint').textContent = "Float: beidseitiger Randschnitt + MaxRects. Lookahead aktiv je nach Qualität. Traversen (wenn AN): Tie-Break nach X/Y und Min/Max Breite.";
   }
 
   if (currentPlan) updateUI();
@@ -1430,6 +1472,7 @@ $('pdfBtn').addEventListener('click', exportPDFAll);
 addCutRow({name:"Pos10", w:1000, h:500, qty:1});
 addCutRow({name:"Pos20", w:800, h:600, qty:2});
 applyModeUI();
+applyTraverseUI();
 updateUI();
 </script>
 </body>
