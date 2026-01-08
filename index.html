@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Flachglas Zuschnitt-Optimierung (Tafelliste + Float/VSG + High Quality + Lookahead)</title>
+  <title>Flachglas Zuschnitt-Optimierung (Tafelliste + Float/VSG + High Quality + Lookahead + Traversen)</title>
   <style>
     :root { --card:#121a24; --muted:#91a4b7; --text:#e8f0fa; --line:#223043; }
     *{ box-sizing:border-box; }
@@ -12,7 +12,7 @@
     header{ padding:18px 18px 8px; max-width:1200px; margin:0 auto; }
     h1{ font-size:18px; margin:0 0 6px; letter-spacing:.2px; }
     .sub{ color:var(--muted); font-size:13px; line-height:1.3; }
-    main{ max-width:1200px; margin:0 auto; padding:12px 18px 28px; display:grid; gap:12px; grid-template-columns: 440px 1fr; }
+    main{ max-width:1200px; margin:0 auto; padding:12px 18px 28px; display:grid; gap:12px; grid-template-columns: 460px 1fr; }
     @media (max-width: 980px){ main{ grid-template-columns: 1fr; } }
     .card{ background:rgba(18,26,36,.92); border:1px solid var(--line); border-radius:14px; padding:14px; box-shadow:0 10px 30px rgba(0,0,0,.25); }
     .card h2{ font-size:14px; margin:0 0 10px; color:#cfe3ff; }
@@ -56,9 +56,11 @@
 </head>
 <body>
 <header>
-  <h1>Zuschnitt-Optimierung – Tafelliste + Float/VSG + High-Quality (Lookahead)</h1>
+  <h1>Zuschnitt-Optimierung – Tafelliste + Float/VSG + High-Quality (Lookahead + Traversen)</h1>
   <div class="sub">
-    Standard: <b>maximale Materialnutzung / minimaler Verschnitt</b>, Rotation <b>AN</b>. “Positionen zusammenhalten” ist <b>AUS</b> (nur wenn ausdrücklich gewählt).
+    Primär: <b>maximale Materialnutzung / minimaler Verschnitt</b>. Rotation standard <b>AN</b>.
+    Optional: <b>Traversen bevorzugen</b> (nur als Tie-Break, verschlechtert nicht den Verschnitt).
+    “Positionen zusammenhalten” ist <b>AUS</b> (nur wenn ausdrücklich gewählt).
   </div>
 </header>
 
@@ -101,6 +103,20 @@
       </div>
     </div>
 
+    <div class="row" style="margin-bottom:10px;">
+      <div class="chk" title="Traversen werden nur als Tie-Break bevorzugt (Verschnitt bleibt Priorität #1).">
+        <input id="preferTraverses" type="checkbox" checked />
+        <div>
+          <div style="font-weight:700; font-size:13px;">Traversen bevorzugen</div>
+          <div class="muted">nur bei gleichem Verschnitt</div>
+        </div>
+      </div>
+      <div>
+        <label>Min. Traversenbreite (mm)</label>
+        <input id="minTraverse" type="number" value="120" min="1" step="1">
+      </div>
+    </div>
+
     <div>
       <label>Tafelliste (je Zeile <code>Breite×Höhe</code> in mm, z.B. <code>3210x2250</code>)</label>
       <textarea id="sheetList" spellcheck="false">3210x2250
@@ -136,7 +152,7 @@
     </div>
 
     <div class="hint" style="margin-top:12px;" id="modeHint">
-      Lookahead: Tafelauswahl schaut 1 Schritt voraus (verhindert “zu gierige” erste Tafeln, verbessert Verschnitt).
+      Lookahead: Tafelauswahl schaut 1 Schritt voraus. Traversen: bevorzugt zusammenhängende Reststreifen (Tie-Break).
     </div>
 
     <div class="hr"></div>
@@ -168,7 +184,7 @@
     <h2>3) Import / Export</h2>
     <div class="fileRow">
       <div>
-        <label>CSV Import (Name,Breite,Höhe,Menge)</label>
+        <label>CSV Import (Name,Breite_mm,Höhe_mm,Menge)</label>
         <input id="csvFile" type="file" accept=".csv,text/csv">
       </div>
       <div>
@@ -351,30 +367,56 @@ function formatCounts(sheets){
 }
 
 /** ---------------------------
- *  Objective / Scoring (strict: waste -> totalArea -> sheetCount)
+ *  Traversen Scoring (Tie-Break)
  * --------------------------- */
-function scorePlan(sheets){
+function traverseScoreForSheet(sheet, minStrip = 120, coverage = 0.80){
+  const usableW = sheet.usableWidth;
+  const usableH = sheet.usableHeight;
+  const free = sheet.free || [];
+  let score = 0; // mm²
+
+  for (const r of free){
+    const isHorizontalTraverse = (r.w >= usableW * coverage) && (r.h >= minStrip);
+    const isVerticalTraverse   = (r.h >= usableH * coverage) && (r.w >= minStrip);
+    if (isHorizontalTraverse || isVerticalTraverse){
+      score += r.w * r.h;
+    }
+  }
+  return score;
+}
+
+/** ---------------------------
+ *  Objective / Scoring (waste -> totalArea -> traverse -> sheetCount)
+ * --------------------------- */
+function scorePlan(sheets, preferTraverses, minStrip){
   const totalArea = sheets.reduce((s,sh)=>s + sh.width*sh.height, 0);
   const usedArea  = sheets.reduce((s,sh)=>s + sh.used, 0);
   const waste     = totalArea - usedArea;
   const n         = sheets.length;
-  return {waste, totalArea, n, usedArea};
+
+  const traverse = preferTraverses
+    ? sheets.reduce((s,sh)=> s + traverseScoreForSheet(sh, minStrip, 0.80), 0)
+    : 0;
+
+  return {waste, totalArea, n, usedArea, traverse};
 }
 
-// IMPORTANT: prioritizes minimal waste / maximal usage
 function betterScore(a,b){
   if (!b) return true;
 
-  // 1) Verschnitt minimieren
+  // 1) Verschnitt minimieren (absolute Fläche)
   if (a.waste !== b.waste) return a.waste < b.waste;
 
   // 2) bei gleichem Verschnitt: weniger Gesamtfläche => höhere Ausbeute
   if (a.totalArea !== b.totalArea) return a.totalArea < b.totalArea;
 
-  // 3) erst danach: weniger Tafeln
+  // 3) Tie-break: mehr Traversenfläche bevorzugen (wenn aktiviert)
+  if (a.traverse !== b.traverse) return a.traverse > b.traverse;
+
+  // 4) dann weniger Tafeln
   if (a.n !== b.n) return a.n < b.n;
 
-  // 4) letzte Kante: mehr genutzte Fläche
+  // 5) letzte Kante
   return a.usedArea > b.usedArea;
 }
 
@@ -615,14 +657,12 @@ class GuillotineBin {
 /** ---------------------------
  *  Lookahead helpers
  * --------------------------- */
-// score for choosing a sheet format in a single step, based on "used", "ratio", or "hybrid"
 function sheetMetric(used, sheetArea, rule, alpha){
   if (rule === "ratio") return used / sheetArea;
   if (rule === "hybrid") return used - alpha * sheetArea;
   return used; // "used"
 }
 
-// compute best possible "next sheet metric" for remaining parts
 function bestNextMetricFloat(remaining, sheetChoices, trimX, trimY, allowRotate, heuristic, rule, alpha){
   let best = -Infinity;
   for (const sc of sheetChoices){
@@ -660,13 +700,13 @@ function bestNextMetricVsg(remaining, sheetChoices, allowRotate, heuristic, spli
 }
 
 /** ---------------------------
- *  Float greedy packing with sheet-choice + Lookahead
+ *  Float packing with sheet-choice + Lookahead
  * --------------------------- */
 function packFloatGreedy(rects, sheetChoices, trimX, trimY, allowRotate, cfg){
-  const heuristic = cfg.heuristic;    // BSSF/BLSF/BAF
-  const sheetRule = cfg.sheetRule;    // used/ratio/hybrid
+  const heuristic = cfg.heuristic;
+  const sheetRule = cfg.sheetRule;
   const alpha = cfg.alpha ?? 0.06;
-  const lookaheadW = cfg.lookaheadW ?? 0; // 0..1
+  const lookaheadW = cfg.lookaheadW ?? 0;
 
   let remaining = rects.slice();
   const unplaceable = [];
@@ -688,17 +728,15 @@ function packFloatGreedy(rects, sheetChoices, trimX, trimY, allowRotate, cfg){
       const usableW = sc.w - 2*trimX, usableH = sc.h - 2*trimY;
       if (usableW<=0 || usableH<=0) continue;
 
-      // simulate placement and also capture what would be placed
       const bin = new MaxRectsBin(usableW, usableH);
       let used = 0;
       const placedIds = new Set();
 
       for (const r of remaining){
         let p = bin.insert(r.w, r.h, heuristic);
-        let rotated = false;
         if (!p && allowRotate && r.w!==r.h){
           const p2 = bin.insert(r.h, r.w, heuristic);
-          if (p2){ p = p2; rotated = true; }
+          if (p2) p = p2;
         }
         if (p){
           used += p.w*p.h;
@@ -709,7 +747,6 @@ function packFloatGreedy(rects, sheetChoices, trimX, trimY, allowRotate, cfg){
 
       const base = sheetMetric(used, sc.w*sc.h, sheetRule, alpha);
 
-      // 1-step lookahead: estimate best next metric after removing placed
       let combined = base;
       if (lookaheadW > 0){
         const rem2 = remaining.filter(r => !placedIds.has(r.id));
@@ -727,7 +764,6 @@ function packFloatGreedy(rects, sheetChoices, trimX, trimY, allowRotate, cfg){
       break;
     }
 
-    // pack for real on chosen sheet
     const bin = new MaxRectsBin(bestChoice.usableW, bestChoice.usableH);
     const placed = [];
     const placedIds = new Set();
@@ -752,7 +788,9 @@ function packFloatGreedy(rects, sheetChoices, trimX, trimY, allowRotate, cfg){
       trimX, trimY,
       usableWidth: bestChoice.usableW, usableHeight: bestChoice.usableH,
       used: bin.usedArea(),
-      placed
+      placed,
+      // free rectangles in sheet coords (only for traverse scoring / debug)
+      free: bin.free.map(r => ({ x: r.x + trimX, y: r.y + trimY, w: r.w, h: r.h }))
     });
   }
 
@@ -760,12 +798,12 @@ function packFloatGreedy(rects, sheetChoices, trimX, trimY, allowRotate, cfg){
 }
 
 /** ---------------------------
- *  VSG greedy packing with sheet-choice + Lookahead (Guillotine)
+ *  VSG packing with sheet-choice + Lookahead (Guillotine)
  * --------------------------- */
 function packVsgGreedy(rects, sheetChoices, allowRotate, cfg){
-  const heuristic = cfg.heuristic;    // BSSF/BLSF/BAF
-  const splitRule = cfg.splitRule;    // shorter/longer/horizontal/vertical
-  const sheetRule = cfg.sheetRule;    // used/ratio/hybrid
+  const heuristic = cfg.heuristic;
+  const splitRule = cfg.splitRule;
+  const sheetRule = cfg.sheetRule;
   const alpha = cfg.alpha ?? 0.06;
   const lookaheadW = cfg.lookaheadW ?? 0;
 
@@ -790,7 +828,10 @@ function packVsgGreedy(rects, sheetChoices, allowRotate, cfg){
 
       for (const r of remaining){
         let p = bin.insert(r.w, r.h, heuristic);
-        if (!p && allowRotate && r.w!==r.h) p = bin.insert(r.h, r.w, heuristic);
+        if (!p && allowRotate && r.w!==r.h){
+          const p2 = bin.insert(r.h, r.w, heuristic);
+          if (p2) p = p2;
+        }
         if (p){
           used += p.w*p.h;
           placedIds.add(r.id);
@@ -826,7 +867,7 @@ function packVsgGreedy(rects, sheetChoices, allowRotate, cfg){
       let rotated = false;
       if (!p && allowRotate && r.w!==r.h){
         const p2 = bin.insert(r.h, r.w, heuristic);
-        if (p2){ p=p2; rotated=true; }
+        if (p2){ p = p2; rotated = true; }
       }
       if (p){
         placed.push({id:r.id, name:r.name, x:p.x, y:p.y, w:p.w, h:p.h, rotated});
@@ -841,7 +882,8 @@ function packVsgGreedy(rects, sheetChoices, allowRotate, cfg){
       trimX: 0, trimY: 0,
       usableWidth: bestChoice.sc.w, usableHeight: bestChoice.sc.h,
       used: bin.usedArea(),
-      placed
+      placed,
+      free: bin.free.map(r => ({ x: r.x, y: r.y, w: r.w, h: r.h }))
     });
   }
 
@@ -849,7 +891,7 @@ function packVsgGreedy(rects, sheetChoices, allowRotate, cfg){
 }
 
 /** ---------------------------
- *  Multi-start optimizer (with Lookahead weight by quality)
+ *  Multi-start optimizer (Lookahead + Traversen tie-break)
  * --------------------------- */
 function qualityBudgetMs(){
   const q = $('quality').value;
@@ -864,7 +906,7 @@ function lookaheadWeight(){
   return 0.0;
 }
 
-function optimizeHighQuality(rects, mode, sheetChoices, trimX, trimY, allowRotate, keepTogether){
+function optimizeHighQuality(rects, mode, sheetChoices, trimX, trimY, allowRotate, keepTogether, preferTraverses, minTraverse){
   const start = performance.now();
   const budget = qualityBudgetMs();
   const laW = lookaheadWeight();
@@ -875,7 +917,7 @@ function optimizeHighQuality(rects, mode, sheetChoices, trimX, trimY, allowRotat
   const alphas = [0.04, 0.06, 0.08];
   const splitRules = ["shorter","longer","horizontal","vertical"]; // VSG
 
-  let best = null;       // {packed, cfg}
+  let best = null;
   let bestScoreObj = null;
   let attempts = 0;
 
@@ -901,7 +943,7 @@ function optimizeHighQuality(rects, mode, sheetChoices, trimX, trimY, allowRotat
               heuristic: heu, sheetRule: rule, alpha, lookaheadW: laW
             });
             attempts++;
-            const sc = scorePlan(packed.sheets);
+            const sc = scorePlan(packed.sheets, preferTraverses, minTraverse);
             if (betterScore(sc, bestScoreObj)){
               bestScoreObj = sc;
               best = {packed, cfg:{ord, heu, rule, alpha, lookaheadW: laW}};
@@ -914,7 +956,7 @@ function optimizeHighQuality(rects, mode, sheetChoices, trimX, trimY, allowRotat
                 heuristic: heu, splitRule: sr, sheetRule: rule, alpha, lookaheadW: laW
               });
               attempts++;
-              const sc = scorePlan(packed.sheets);
+              const sc = scorePlan(packed.sheets, preferTraverses, minTraverse);
               if (betterScore(sc, bestScoreObj)){
                 bestScoreObj = sc;
                 best = {packed, cfg:{ord, heu, rule, alpha, splitRule: sr, lookaheadW: laW}};
@@ -929,7 +971,7 @@ function optimizeHighQuality(rects, mode, sheetChoices, trimX, trimY, allowRotat
   if (!best){
     return {packed:{sheets:[], unplaceable:rects.slice()}, cfg:{note:"no solution"}, attempts};
   }
-  return {packed: best.packed, cfg: best.cfg, attempts};
+  return {packed: best.packed, cfg: best.cfg, attempts, bestScoreObj};
 }
 
 /** ---------------------------
@@ -942,6 +984,8 @@ function buildAndOptimize(){
   const mode = $('glassMode').value;           // float|vsg
   const allowRotate = $('allowRotate').value === "1";
   const keepTogether = $('keepTogether').checked;
+  const preferTraverses = $('preferTraverses').checked;
+  const minTraverse = Math.max(1, Math.floor(Number($('minTraverse').value) || 120));
 
   const sheetChoicesRaw = parseSheetList($('sheetList').value);
   if (!sheetChoicesRaw.length){
@@ -972,10 +1016,12 @@ function buildAndOptimize(){
   const rects = expandCuts(items);
 
   const t0 = performance.now();
-  const {packed, cfg, attempts} = optimizeHighQuality(rects, mode, sheetChoices, trimX, trimY, allowRotate, keepTogether);
+  const {packed, cfg, attempts, bestScoreObj} = optimizeHighQuality(
+    rects, mode, sheetChoices, trimX, trimY, allowRotate, keepTogether, preferTraverses, minTraverse
+  );
   const t1 = performance.now();
 
-  const totals = scorePlan(packed.sheets);
+  const totals = scorePlan(packed.sheets, preferTraverses, minTraverse);
 
   currentPlan = {
     meta: {
@@ -983,6 +1029,8 @@ function buildAndOptimize(){
       mode,
       allowRotate,
       keepTogether,
+      preferTraverses,
+      minTraverse,
       algorithm: mode === "vsg" ? "Guillotine Multi-Start (Lookahead)" : "MaxRects Multi-Start (Lookahead)",
       bestConfig: cfg,
       attempts,
@@ -1003,7 +1051,8 @@ function buildAndOptimize(){
       sheets: packed.sheets.length,
       used_mm2: totals.usedArea,
       sheet_mm2: totals.totalArea,
-      waste_mm2: totals.waste
+      waste_mm2: totals.waste,
+      traverse_mm2: totals.traverse
     }
   };
 
@@ -1106,8 +1155,11 @@ function updateUI(){
   const waste_m2 = mm2_to_m2(p.totals.waste_mm2);
   const yieldPct = p.totals.sheet_mm2 > 0 ? (p.totals.used_mm2 / p.totals.sheet_mm2 * 100) : 0;
 
+  const trav_m2 = mm2_to_m2(p.totals.traverse_mm2 || 0);
+  const travTxt = p.meta.preferTraverses ? ` · Traversen: ${fmt(trav_m2,2)} m² (Tie-Break)` : "";
+
   $('summaryLine').textContent =
-    `Tafeln: ${p.totals.sheets} · Nutzung: ${fmt(used_m2,2)} m² · Verschnitt: ${fmt(waste_m2,2)} m² · Ausbeute: ${fmt(yieldPct,1)}% · Läufe: ${p.meta.attempts} · ${p.meta.runtime_ms} ms · Lookahead: ${fmt(p.meta.lookaheadWeight,2)}`;
+    `Tafeln: ${p.totals.sheets} · Nutzung: ${fmt(used_m2,2)} m² · Verschnitt: ${fmt(waste_m2,2)} m² · Ausbeute: ${fmt(yieldPct,1)}% · Läufe: ${p.meta.attempts} · ${p.meta.runtime_ms} ms · Lookahead: ${fmt(p.meta.lookaheadWeight,2)}${travTxt}`;
 
   const sh = p.sheets[currentIndex];
   const sheetArea_m2 = mm2_to_m2(sh.width*sh.height);
@@ -1149,9 +1201,14 @@ function updateUI(){
     ? `Order=${cfg.ord}, Heu=${cfg.heu}, Split=${cfg.splitRule}, SheetRule=${cfg.rule}, α=${cfg.alpha}, LA=${fmt(cfg.lookaheadW||0,2)}`
     : `Order=${cfg.ord}, Heu=${cfg.heu}, SheetRule=${cfg.rule}, α=${cfg.alpha}, LA=${fmt(cfg.lookaheadW||0,2)}`;
 
+  const travLine = p.meta.preferTraverses
+    ? `<div><b>Traversen Tie-Break:</b> aktiv · MinBreite=${p.meta.minTraverse} mm · Gesamt-Traversenfläche=${fmt(mm2_to_m2(p.totals.traverse_mm2||0),2)} m²</div>`
+    : `<div><b>Traversen Tie-Break:</b> aus</div>`;
+
   $('report').innerHTML = `
     <div><b>Optimizer:</b> ${escapeHtml(p.meta.algorithm)} · ${p.meta.mode.toUpperCase()} · Rotation: ${p.meta.allowRotate ? "Ja" : "Nein"}</div>
     <div><b>Positionen zusammenhalten:</b> ${p.meta.keepTogether ? "Ja (kann Ausbeute reduzieren)" : "Nein (Standard, beste Ausnutzung)"}</div>
+    ${travLine}
     <div><b>Beste Konfiguration:</b> ${escapeHtml(cfgLine)}</div>
     <div><b>Tafelliste:</b> ${p.input.sheetChoices.map(sc=>`${sc.w}x${sc.h}`).join(", ")}</div>
     <div><b>Randschnitt:</b> ${p.meta.mode==="vsg" ? "VSG: 0" : `Float: beidseitig (X=${p.input.trimX}, Y=${p.input.trimY})`}</div>
@@ -1217,6 +1274,8 @@ async function importJSON(file){
     $('glassMode').value = obj.meta?.mode || "float";
     $('allowRotate').value = obj.meta?.allowRotate ? "1" : "0";
     $('keepTogether').checked = !!obj.meta?.keepTogether;
+    $('preferTraverses').checked = obj.meta?.preferTraverses !== false;
+    $('minTraverse').value = obj.meta?.minTraverse ?? 120;
     $('trimX').value = obj.input.trimX ?? 0;
     $('trimY').value = obj.input.trimY ?? 0;
     applyModeUI();
@@ -1289,9 +1348,9 @@ function applyModeUI(){
     $('trimX').value = 0;
     $('trimY').value = 0;
     $('showTrim').value = "0";
-    $('modeHint').textContent = "VSG: kein Randschnitt + Guillotine (keine Z-Schnitte). Lookahead aktiv je nach Qualitätsstufe.";
+    $('modeHint').textContent = "VSG: kein Randschnitt + Guillotine (keine Z-Schnitte). Lookahead & Traversen-Tie-Break je nach Einstellung.";
   } else {
-    $('modeHint').textContent = "Float: beidseitiger Randschnitt + MaxRects. Lookahead aktiv je nach Qualitätsstufe.";
+    $('modeHint').textContent = "Float: beidseitiger Randschnitt + MaxRects. Lookahead & Traversen-Tie-Break je nach Einstellung.";
   }
 
   if (currentPlan) updateUI();
