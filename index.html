@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Flachglas Zuschnitt-Optimierung (Tafelliste + Float/VSG + High Quality + Lookahead + Traversen)</title>
+  <title>Flachglas Zuschnitt-Optimierung (Tafelliste + Float/VSG + Glas-Schnittbarkeit + Traversen)</title>
   <style>
     :root { --card:#121a24; --muted:#91a4b7; --text:#e8f0fa; --line:#223043; }
     *{ box-sizing:border-box; }
@@ -12,7 +12,7 @@
     header{ padding:18px 18px 8px; max-width:1200px; margin:0 auto; }
     h1{ font-size:18px; margin:0 0 6px; letter-spacing:.2px; }
     .sub{ color:var(--muted); font-size:13px; line-height:1.3; }
-    main{ max-width:1200px; margin:0 auto; padding:12px 18px 28px; display:grid; gap:12px; grid-template-columns: 560px 1fr; }
+    main{ max-width:1200px; margin:0 auto; padding:12px 18px 28px; display:grid; gap:12px; grid-template-columns: 620px 1fr; }
     @media (max-width: 980px){ main{ grid-template-columns: 1fr; } }
     .card{ background:rgba(18,26,36,.92); border:1px solid var(--line); border-radius:14px; padding:14px; box-shadow:0 10px 30px rgba(0,0,0,.25); }
     .card h2{ font-size:14px; margin:0 0 10px; color:#cfe3ff; }
@@ -56,11 +56,10 @@
 </head>
 <body>
 <header>
-  <h1>Zuschnitt-Optimierung – Tafelliste + Float/VSG + High-Quality (Lookahead + Traversen)</h1>
+  <h1>Flachglas Zuschnitt-Optimierung – glasgerecht + Traversen</h1>
   <div class="sub">
-    Primär: <b>maximale Materialnutzung / minimaler Verschnitt</b>. Rotation standard <b>AN</b>.
-    Traversen können <b>AN/AUS</b> geschaltet werden und (wenn AN) mit <b>X</b> oder <b>Y</b>-Ausrichtung bewertet werden (Tie-Break, verschlechtert nicht den Verschnitt).
-    “Positionen zusammenhalten” ist <b>AUS</b> (nur wenn ausdrücklich gewählt).
+    Diese Version berücksichtigt, dass der Zuschnitt aus <b>geraden Schnitten</b> besteht (Anritzen/Brechen).
+    Z-“Formen” sind nur als <b>Sequenz</b> aus geraden Schnitten möglich – unterstützt durch <b>Traversen-Bänder</b> (Min/Max).
   </div>
 </header>
 
@@ -72,8 +71,8 @@
       <div>
         <label>Glasart</label>
         <select id="glassMode">
-          <option value="float" selected>Floatglas (Randschnitt, Top-Ausnutzung)</option>
-          <option value="vsg">VSG (kein Randschnitt, keine Z-Schnitte / Guillotine)</option>
+          <option value="float" selected>Floatglas (Randschnitt beidseitig)</option>
+          <option value="vsg">VSG (kein Randschnitt, keine Z-Schnitte)</option>
         </select>
       </div>
       <div>
@@ -88,12 +87,22 @@
 
     <div class="row" style="margin-bottom:10px;">
       <div>
+        <label>Schnittmodell (Float)</label>
+        <select id="cutModel" title="Guillotine = nur Vollschnitte. Free = freie Platzierung, aber wird auf Glas-Schnittbarkeit geprüft.">
+          <option value="guillotine" selected>Guillotine (Vollschnitte)</option>
+          <option value="free">Frei platzieren (MaxRects) + Schnittbarkeits-Filter</option>
+        </select>
+      </div>
+      <div>
         <label>Rotation erlauben</label>
         <select id="allowRotate">
           <option value="1" selected>Ja</option>
           <option value="0">Nein</option>
         </select>
       </div>
+    </div>
+
+    <div class="row" style="margin-bottom:10px;">
       <div class="chk" title="Standard AUS. Wenn EIN: versucht der Optimierer, Teile gleicher Position/Name bevorzugt auf derselben Tafel zu halten (kann Ausbeute verschlechtern).">
         <input id="keepTogether" type="checkbox" />
         <div>
@@ -101,13 +110,13 @@
           <div class="muted">nur wenn ausdrücklich gewünscht</div>
         </div>
       </div>
+      <div></div>
     </div>
 
-    <!-- TraversEN: nur zwei Optionen AN/AUS -->
     <div class="row3" style="margin-bottom:10px;">
       <div>
         <label>Traversen</label>
-        <select id="traverseMode" title="Traversen werden nur als Tie-Break berücksichtigt (bei gleichem Verschnitt).">
+        <select id="traverseMode" title="Traversen werden als Neben-Ziel bewertet (bei gleicher Ausbeute) und als 'Arbeitszonen' für Z-Schritte genutzt.">
           <option value="on" selected>Traversen AN</option>
           <option value="off">Traversen AUS</option>
         </select>
@@ -124,8 +133,8 @@
 
     <div class="row" style="margin-bottom:10px;">
       <div>
-        <label>Traversen-Ausrichtung (Bewertung)</label>
-        <select id="traverseAxis" title="X = horizontaler Streifen (spannt Nutzbreite). Y = vertikaler Streifen (spannt Nutzhöhe).">
+        <label>Traversen-Ausrichtung</label>
+        <select id="traverseAxis" title="X = horizontales Band (spannt Nutzbreite). Y = vertikales Band (spannt Nutzhöhe).">
           <option value="x" selected>X-Achse (horizontal)</option>
           <option value="y">Y-Achse (vertikal)</option>
         </select>
@@ -168,7 +177,8 @@
     </div>
 
     <div class="hint" style="margin-top:12px;" id="modeHint">
-      Lookahead: Tafelauswahl schaut 1 Schritt voraus. Traversen (wenn AN): Tie-Break nach X/Y-Ausrichtung und Min/Max Breite.
+      Hinweis: Auch im “Free”-Modus werden Pläne verworfen, die nicht als Folge gerader Vollschnitte (mit Teiltafeln) machbar sind.
+      Traversen werden als durchgehende Bänder (Min/Max) bewertet.
     </div>
 
     <div class="hr"></div>
@@ -216,7 +226,7 @@
     <div class="hr"></div>
 
     <div class="btnbar">
-      <button id="optBtn" class="primary">Optimieren (High-Quality)</button>
+      <button id="optBtn" class="primary">Optimieren</button>
       <button id="resetViewBtn">Ansicht zurücksetzen</button>
     </div>
   </section>
@@ -307,7 +317,7 @@ function hashHue(str){
 }
 
 /** ---------------------------
- *  Traverse UI enable/disable
+ *  UI enable/disable
  * --------------------------- */
 function applyTraverseUI(){
   const on = $('traverseMode').value === "on";
@@ -319,6 +329,32 @@ $('traverseMode').addEventListener('change', () => {
   applyTraverseUI();
   if (currentPlan) updateUI();
 });
+
+function applyModeUI(){
+  const mode = $('glassMode').value;
+  const isVsg = mode === "vsg";
+
+  $('trimX').disabled = isVsg;
+  $('trimY').disabled = isVsg;
+  $('cutModel').disabled = isVsg;
+
+  if (isVsg){
+    $('trimX').value = 0;
+    $('trimY').value = 0;
+    $('showTrim').value = "0";
+    $('cutModel').value = "guillotine";
+    $('modeHint').textContent =
+      "VSG: kein Randschnitt + Guillotine (keine Z-Schnitte als freie Verschachtelung). " +
+      "Traversen (wenn AN): durchgehende Bänder (Min/Max) in X oder Y.";
+  } else {
+    $('modeHint').textContent =
+      "Float: beidseitiger Randschnitt. Guillotine ist am sichersten. " +
+      "Im Free-Modus werden Pläne nur akzeptiert, wenn sie als Folge gerader Vollschnitte machbar sind.";
+  }
+
+  if (currentPlan) updateUI();
+}
+$('glassMode').addEventListener('change', applyModeUI);
 
 /** ---------------------------
  *  UI: Cuts table
@@ -397,38 +433,181 @@ function formatCounts(sheets){
 }
 
 /** ---------------------------
- *  Traversen Scoring (Tie-Break)
- *  axisMode:
- *    - "x": horizontaler Streifen (spannt Nutzbreite), Dicke = r.h
- *    - "y": vertikaler Streifen (spannt Nutzhöhe), Dicke = r.w
- *  thickness muss zwischen minStrip und maxStrip liegen
+ *  Traversen-Bänder (durchgehend) aus belegten Rechtecken
+ *  axisMode: "x" => horizontales Band (spannt Nutzbreite), Dicke = Gap in Y
+ *            "y" => vertikales Band (spannt Nutzhöhe), Dicke = Gap in X
  * --------------------------- */
-function traverseScoreForSheet(sheet, axisMode = "x", minStrip = 120, maxStrip = 800, coverage = 0.80){
-  const usableW = sheet.usableWidth;
-  const usableH = sheet.usableHeight;
-  const free = sheet.free || [];
-  let score = 0; // mm²
+function getTraverseBandsFromPlaced(placedRects, usableW, usableH, axisMode, minStrip, maxStrip){
+  const bands = [];
 
-  for (const r of free){
-    if (axisMode === "x"){
-      const spans = (r.w >= usableW * coverage);
-      const thickness = r.h;
-      if (spans && thickness >= minStrip && thickness <= maxStrip){
-        score += r.w * r.h;
+  if (axisMode === "x"){
+    const intervals = placedRects.map(r => [r.y, r.y + r.h]).filter(iv => iv[1] > iv[0]);
+    intervals.sort((a,b)=>a[0]-b[0]);
+
+    const merged = [];
+    for (const iv of intervals){
+      if (!merged.length || iv[0] > merged[merged.length-1][1]){
+        merged.push(iv.slice());
+      } else {
+        merged[merged.length-1][1] = Math.max(merged[merged.length-1][1], iv[1]);
       }
-    } else { // "y"
-      const spans = (r.h >= usableH * coverage);
-      const thickness = r.w;
-      if (spans && thickness >= minStrip && thickness <= maxStrip){
-        score += r.w * r.h;
+    }
+
+    let prev = 0;
+    for (const [a,b] of merged){
+      if (a > prev){
+        const gap = a - prev;
+        if (gap >= minStrip && gap <= maxStrip){
+          bands.push({axis:"x", y:prev, h:gap, area: gap * usableW});
+        }
+      }
+      prev = Math.max(prev, b);
+    }
+    if (usableH > prev){
+      const gap = usableH - prev;
+      if (gap >= minStrip && gap <= maxStrip){
+        bands.push({axis:"x", y:prev, h:gap, area: gap * usableW});
+      }
+    }
+
+  } else {
+    const intervals = placedRects.map(r => [r.x, r.x + r.w]).filter(iv => iv[1] > iv[0]);
+    intervals.sort((a,b)=>a[0]-b[0]);
+
+    const merged = [];
+    for (const iv of intervals){
+      if (!merged.length || iv[0] > merged[merged.length-1][1]){
+        merged.push(iv.slice());
+      } else {
+        merged[merged.length-1][1] = Math.max(merged[merged.length-1][1], iv[1]);
+      }
+    }
+
+    let prev = 0;
+    for (const [a,b] of merged){
+      if (a > prev){
+        const gap = a - prev;
+        if (gap >= minStrip && gap <= maxStrip){
+          bands.push({axis:"y", x:prev, w:gap, area: gap * usableH});
+        }
+      }
+      prev = Math.max(prev, b);
+    }
+    if (usableW > prev){
+      const gap = usableW - prev;
+      if (gap >= minStrip && gap <= maxStrip){
+        bands.push({axis:"y", x:prev, w:gap, area: gap * usableH});
       }
     }
   }
-  return score;
+
+  bands.sort((a,b)=>b.area-a.area);
+  return bands;
 }
 
 /** ---------------------------
- *  Objective / Scoring (waste -> totalArea -> traverse -> sheetCount)
+ *  Guillotinierbarkeit (glasgerechte Schnittfolge aus Vollschnitten)
+ *  True => Rechtecke können rekursiv durch Vollschnitt getrennt werden.
+ * --------------------------- */
+function isGuillotinable(rects, W, H){
+  const memo = new Map();
+
+  function keyOf(rs, w, h){
+    const parts = rs.map(r => `${r.x}|${r.y}|${r.w}|${r.h}`).sort();
+    return `${w}x${h}::` + parts.join(";");
+  }
+
+  function rec(rs, w, h){
+    if (rs.length <= 1) return true;
+
+    const key = keyOf(rs, w, h);
+    if (memo.has(key)) return memo.get(key);
+
+    const xCuts = new Set();
+    const yCuts = new Set();
+    for (const r of rs){
+      xCuts.add(r.x); xCuts.add(r.x + r.w);
+      yCuts.add(r.y); yCuts.add(r.y + r.h);
+    }
+
+    for (const c of xCuts){
+      if (c <= 0 || c >= w) continue;
+
+      let ok = true;
+      for (const r of rs){
+        if (r.x < c && (r.x + r.w) > c){ ok = false; break; }
+      }
+      if (!ok) continue;
+
+      const left = [];
+      const right = [];
+      for (const r of rs){
+        if (r.x + r.w <= c) left.push(r);
+        else if (r.x >= c) right.push({x:r.x - c, y:r.y, w:r.w, h:r.h});
+        else { ok = false; break; }
+      }
+      if (!ok || !left.length || !right.length) continue;
+
+      if (rec(left, c, h) && rec(right, w - c, h)){
+        memo.set(key, true);
+        return true;
+      }
+    }
+
+    for (const c of yCuts){
+      if (c <= 0 || c >= h) continue;
+
+      let ok = true;
+      for (const r of rs){
+        if (r.y < c && (r.y + r.h) > c){ ok = false; break; }
+      }
+      if (!ok) continue;
+
+      const top = [];
+      const bottom = [];
+      for (const r of rs){
+        if (r.y + r.h <= c) top.push(r);
+        else if (r.y >= c) bottom.push({x:r.x, y:r.y - c, w:r.w, h:r.h});
+        else { ok = false; break; }
+      }
+      if (!ok || !top.length || !bottom.length) continue;
+
+      if (rec(top, w, c) && rec(bottom, w, h - c)){
+        memo.set(key, true);
+        return true;
+      }
+    }
+
+    memo.set(key, false);
+    return false;
+  }
+
+  return rec(rects, W, H);
+}
+
+/** ---------------------------
+ *  Traversen Score pro Tafel (durchgehende Bänder)
+ * --------------------------- */
+function traverseScoreForSheet(sheet, axisMode = "x", minStrip = 120, maxStrip = 800){
+  const usableW = sheet.usableWidth;
+  const usableH = sheet.usableHeight;
+
+  const px = sheet.trimX || 0;
+  const py = sheet.trimY || 0;
+
+  const placedU = (sheet.placed || []).map(p => ({
+    x: p.x - px,
+    y: p.y - py,
+    w: p.w,
+    h: p.h
+  }));
+
+  const bands = getTraverseBandsFromPlaced(placedU, usableW, usableH, axisMode, minStrip, maxStrip);
+  return bands.reduce((s,b)=>s + b.area, 0);
+}
+
+/** ---------------------------
+ *  Objective / Scoring
  * --------------------------- */
 function scorePlan(sheets, preferTraverses, traverseAxis, minStrip, maxStrip){
   const totalArea = sheets.reduce((s,sh)=>s + sh.width*sh.height, 0);
@@ -436,29 +615,41 @@ function scorePlan(sheets, preferTraverses, traverseAxis, minStrip, maxStrip){
   const waste     = totalArea - usedArea;
   const n         = sheets.length;
 
+  // Glas-Machbarkeit: jedes Sheet guillotinierbar (Folge gerader Vollschnitte)
+  let feasible = true;
+  for (const sh of sheets){
+    const px = sh.trimX || 0, py = sh.trimY || 0;
+    const rectsU = (sh.placed || []).map(p => ({x:p.x-px, y:p.y-py, w:p.w, h:p.h}));
+    if (!isGuillotinable(rectsU, sh.usableWidth, sh.usableHeight)){
+      feasible = false; break;
+    }
+  }
+
   const traverse = preferTraverses
-    ? sheets.reduce((s,sh)=> s + traverseScoreForSheet(sh, traverseAxis, minStrip, maxStrip, 0.80), 0)
+    ? sheets.reduce((s,sh)=> s + traverseScoreForSheet(sh, traverseAxis, minStrip, maxStrip), 0)
     : 0;
 
-  return {waste, totalArea, n, usedArea, traverse};
+  return {waste, totalArea, n, usedArea, traverse, feasible};
 }
 
 function betterScore(a,b){
   if (!b) return true;
 
-  // 1) Verschnitt minimieren (absolute Fläche)
+  // 0) Machbarkeit zuerst
+  if (a.feasible !== b.feasible) return a.feasible && !b.feasible;
+
+  // 1) Verschnitt
   if (a.waste !== b.waste) return a.waste < b.waste;
 
-  // 2) bei gleichem Verschnitt: weniger Gesamtfläche => höhere Ausbeute
+  // 2) Gesamtfläche (höhere Ausbeute)
   if (a.totalArea !== b.totalArea) return a.totalArea < b.totalArea;
 
-  // 3) Tie-break: mehr Traversenfläche bevorzugen (wenn aktiviert)
+  // 3) Traversen-Bänder (Tie-break)
   if (a.traverse !== b.traverse) return a.traverse > b.traverse;
 
-  // 4) dann weniger Tafeln
+  // 4) weniger Tafeln
   if (a.n !== b.n) return a.n < b.n;
 
-  // 5) letzte Kante
   return a.usedArea > b.usedArea;
 }
 
@@ -501,7 +692,7 @@ function reorderKeepTogether(rects, rng){
 }
 
 /** ---------------------------
- *  Float: MaxRects
+ *  Float: MaxRects (freie Platzierung)
  * --------------------------- */
 class MaxRectsBin {
   constructor(width, height){
@@ -601,7 +792,7 @@ class MaxRectsBin {
 }
 
 /** ---------------------------
- *  VSG: Guillotine (no Z-cuts)
+ *  Guillotine (Vollschnitte, keine "echten" Z-Schnitte als Einzelschnitt)
  * --------------------------- */
 class GuillotineBin {
   constructor(width, height, splitRule){
@@ -705,7 +896,8 @@ function sheetMetric(used, sheetArea, rule, alpha){
   return used; // "used"
 }
 
-function bestNextMetricFloat(remaining, sheetChoices, trimX, trimY, allowRotate, heuristic, rule, alpha){
+/** next metric: float maxrects */
+function bestNextMetricFloatMaxRects(remaining, sheetChoices, trimX, trimY, allowRotate, heuristic, rule, alpha){
   let best = -Infinity;
   for (const sc of sheetChoices){
     const usableW = sc.w - 2*trimX, usableH = sc.h - 2*trimY;
@@ -724,6 +916,27 @@ function bestNextMetricFloat(remaining, sheetChoices, trimX, trimY, allowRotate,
   return best === -Infinity ? 0 : best;
 }
 
+/** next metric: float guillotine */
+function bestNextMetricFloatGuillotine(remaining, sheetChoices, trimX, trimY, allowRotate, heuristic, splitRule, rule, alpha){
+  let best = -Infinity;
+  for (const sc of sheetChoices){
+    const usableW = sc.w - 2*trimX, usableH = sc.h - 2*trimY;
+    if (usableW<=0 || usableH<=0) continue;
+    const bin = new GuillotineBin(usableW, usableH, splitRule);
+    let used = 0;
+    for (const r of remaining){
+      let p = bin.insert(r.w, r.h, heuristic);
+      if (!p && allowRotate && r.w!==r.h) p = bin.insert(r.h, r.w, heuristic);
+      if (p) used += p.w*p.h;
+    }
+    if (used <= 0) continue;
+    const m = sheetMetric(used, sc.w*sc.h, rule, alpha);
+    if (m > best) best = m;
+  }
+  return best === -Infinity ? 0 : best;
+}
+
+/** next metric: vsg guillotine (kein trim) */
 function bestNextMetricVsg(remaining, sheetChoices, allowRotate, heuristic, splitRule, rule, alpha){
   let best = -Infinity;
   for (const sc of sheetChoices){
@@ -742,9 +955,9 @@ function bestNextMetricVsg(remaining, sheetChoices, allowRotate, heuristic, spli
 }
 
 /** ---------------------------
- *  Float packing with sheet-choice + Lookahead
+ *  Float packing: MaxRects + Sheet choice + Lookahead
  * --------------------------- */
-function packFloatGreedy(rects, sheetChoices, trimX, trimY, allowRotate, cfg){
+function packFloatMaxRectsGreedy(rects, sheetChoices, trimX, trimY, allowRotate, cfg){
   const heuristic = cfg.heuristic;
   const sheetRule = cfg.sheetRule;
   const alpha = cfg.alpha ?? 0.06;
@@ -788,11 +1001,11 @@ function packFloatGreedy(rects, sheetChoices, trimX, trimY, allowRotate, cfg){
       if (used <= 0) continue;
 
       const base = sheetMetric(used, sc.w*sc.h, sheetRule, alpha);
-
       let combined = base;
+
       if (lookaheadW > 0){
         const rem2 = remaining.filter(r => !placedIds.has(r.id));
-        const next = bestNextMetricFloat(rem2, sheetChoices, trimX, trimY, allowRotate, heuristic, sheetRule, alpha);
+        const next = bestNextMetricFloatMaxRects(rem2, sheetChoices, trimX, trimY, allowRotate, heuristic, sheetRule, alpha);
         combined = base + lookaheadW * next;
       }
 
@@ -830,9 +1043,7 @@ function packFloatGreedy(rects, sheetChoices, trimX, trimY, allowRotate, cfg){
       trimX, trimY,
       usableWidth: bestChoice.usableW, usableHeight: bestChoice.usableH,
       used: bin.usedArea(),
-      placed,
-      // freie Rest-Rechtecke in Tafel-Koordinaten (für Traversen-Scoring)
-      free: bin.free.map(r => ({ x: r.x + trimX, y: r.y + trimY, w: r.w, h: r.h }))
+      placed
     });
   }
 
@@ -840,7 +1051,104 @@ function packFloatGreedy(rects, sheetChoices, trimX, trimY, allowRotate, cfg){
 }
 
 /** ---------------------------
- *  VSG packing with sheet-choice + Lookahead (Guillotine)
+ *  Float packing: Guillotine + Sheet choice + Lookahead
+ * --------------------------- */
+function packFloatGuillotineGreedy(rects, sheetChoices, trimX, trimY, allowRotate, cfg){
+  const heuristic = cfg.heuristic;
+  const splitRule = cfg.splitRule;
+  const sheetRule = cfg.sheetRule;
+  const alpha = cfg.alpha ?? 0.06;
+  const lookaheadW = cfg.lookaheadW ?? 0;
+
+  let remaining = rects.slice();
+  const unplaceable = [];
+  const placedSheets = [];
+
+  const fitsAny = (r) => sheetChoices.some(sc => {
+    const uw = sc.w - 2*trimX, uh = sc.h - 2*trimY;
+    if (uw<=0 || uh<=0) return false;
+    return (uw>=r.w && uh>=r.h) || (allowRotate && uw>=r.h && uh>=r.w);
+  });
+  const filtered = [];
+  for (const r of remaining){ fitsAny(r) ? filtered.push(r) : unplaceable.push(r); }
+  remaining = filtered;
+
+  while (remaining.length){
+    let bestChoice = null;
+
+    for (const sc of sheetChoices){
+      const usableW = sc.w - 2*trimX, usableH = sc.h - 2*trimY;
+      if (usableW<=0 || usableH<=0) continue;
+
+      const bin = new GuillotineBin(usableW, usableH, splitRule);
+      let used = 0;
+      const placedIds = new Set();
+
+      for (const r of remaining){
+        let p = bin.insert(r.w, r.h, heuristic);
+        if (!p && allowRotate && r.w!==r.h){
+          const p2 = bin.insert(r.h, r.w, heuristic);
+          if (p2) p = p2;
+        }
+        if (p){
+          used += p.w*p.h;
+          placedIds.add(r.id);
+        }
+      }
+      if (used <= 0) continue;
+
+      const base = sheetMetric(used, sc.w*sc.h, sheetRule, alpha);
+      let combined = base;
+
+      if (lookaheadW > 0){
+        const rem2 = remaining.filter(r => !placedIds.has(r.id));
+        const next = bestNextMetricFloatGuillotine(rem2, sheetChoices, trimX, trimY, allowRotate, heuristic, splitRule, sheetRule, alpha);
+        combined = base + lookaheadW * next;
+      }
+
+      if (!bestChoice || combined > bestChoice.combined){
+        bestChoice = {sc, usableW, usableH, combined};
+      }
+    }
+
+    if (!bestChoice){
+      for (const r of remaining) unplaceable.push(r);
+      break;
+    }
+
+    const bin = new GuillotineBin(bestChoice.usableW, bestChoice.usableH, splitRule);
+    const placed = [];
+    const placedIds = new Set();
+
+    for (const r of remaining){
+      let p = bin.insert(r.w, r.h, heuristic);
+      let rotated = false;
+      if (!p && allowRotate && r.w!==r.h){
+        const p2 = bin.insert(r.h, r.w, heuristic);
+        if (p2){ p = p2; rotated = true; }
+      }
+      if (p){
+        placed.push({id:r.id, name:r.name, x:p.x+trimX, y:p.y+trimY, w:p.w, h:p.h, rotated});
+        placedIds.add(r.id);
+      }
+    }
+
+    remaining = remaining.filter(r => !placedIds.has(r.id));
+
+    placedSheets.push({
+      width: bestChoice.sc.w, height: bestChoice.sc.h,
+      trimX, trimY,
+      usableWidth: bestChoice.usableW, usableHeight: bestChoice.usableH,
+      used: bin.usedArea(),
+      placed
+    });
+  }
+
+  return {sheets: placedSheets, unplaceable};
+}
+
+/** ---------------------------
+ *  VSG packing: Guillotine + Sheet choice + Lookahead
  * --------------------------- */
 function packVsgGreedy(rects, sheetChoices, allowRotate, cfg){
   const heuristic = cfg.heuristic;
@@ -882,8 +1190,8 @@ function packVsgGreedy(rects, sheetChoices, allowRotate, cfg){
       if (used <= 0) continue;
 
       const base = sheetMetric(used, sc.w*sc.h, sheetRule, alpha);
-
       let combined = base;
+
       if (lookaheadW > 0){
         const rem2 = remaining.filter(r => !placedIds.has(r.id));
         const next = bestNextMetricVsg(rem2, sheetChoices, allowRotate, heuristic, splitRule, sheetRule, alpha);
@@ -924,8 +1232,7 @@ function packVsgGreedy(rects, sheetChoices, allowRotate, cfg){
       trimX: 0, trimY: 0,
       usableWidth: bestChoice.sc.w, usableHeight: bestChoice.sc.h,
       used: bin.usedArea(),
-      placed,
-      free: bin.free.map(r => ({ x: r.x, y: r.y, w: r.w, h: r.h }))
+      placed
     });
   }
 
@@ -933,7 +1240,7 @@ function packVsgGreedy(rects, sheetChoices, allowRotate, cfg){
 }
 
 /** ---------------------------
- *  Multi-start optimizer (Lookahead + Traversen tie-break)
+ *  Multi-start optimizer
  * --------------------------- */
 function qualityBudgetMs(){
   const q = $('quality').value;
@@ -948,9 +1255,8 @@ function lookaheadWeight(){
   return 0.0;
 }
 
-function optimizeHighQuality(rects, mode, sheetChoices, trimX, trimY,
-  allowRotate, keepTogether,
-  preferTraverses, traverseAxis, minTraverse, maxTraverse
+function optimizeHighQuality(rects, mode, cutModel, sheetChoices, trimX, trimY,
+  allowRotate, keepTogether, preferTraverses, traverseAxis, minTraverse, maxTraverse
 ){
   const start = performance.now();
   const budget = qualityBudgetMs();
@@ -960,13 +1266,13 @@ function optimizeHighQuality(rects, mode, sheetChoices, trimX, trimY,
   const orders = ["area","maxside","height","perimeter","random"];
   const sheetRules = ["used","hybrid","ratio"];
   const alphas = [0.04, 0.06, 0.08];
-  const splitRules = ["shorter","longer","horizontal","vertical"]; // VSG
+  const splitRules = ["shorter","longer","horizontal","vertical"]; // guillotine split variants
 
   let best = null;
   let bestScoreObj = null;
   let attempts = 0;
 
-  let seedBase = Math.floor((Date.now() % 1e9) ^ (rects.length * 2654435761));
+  const seedBase = Math.floor((Date.now() % 1e9) ^ (rects.length * 2654435761));
 
   outer:
   for (let s=0; ; s++){
@@ -983,17 +1289,7 @@ function optimizeHighQuality(rects, mode, sheetChoices, trimX, trimY,
           let ordered = orderRects(rects, ord, rng);
           if (keepTogether) ordered = reorderKeepTogether(ordered, rng);
 
-          if (mode === "float"){
-            const packed = packFloatGreedy(ordered, sheetChoices, trimX, trimY, allowRotate, {
-              heuristic: heu, sheetRule: rule, alpha, lookaheadW: laW
-            });
-            attempts++;
-            const sc = scorePlan(packed.sheets, preferTraverses, traverseAxis, minTraverse, maxTraverse);
-            if (betterScore(sc, bestScoreObj)){
-              bestScoreObj = sc;
-              best = {packed, cfg:{ord, heu, rule, alpha, lookaheadW: laW}};
-            }
-          } else {
+          if (mode === "vsg"){
             for (const sr of splitRules){
               if (performance.now() - start > budget) break outer;
 
@@ -1005,6 +1301,33 @@ function optimizeHighQuality(rects, mode, sheetChoices, trimX, trimY,
               if (betterScore(sc, bestScoreObj)){
                 bestScoreObj = sc;
                 best = {packed, cfg:{ord, heu, rule, alpha, splitRule: sr, lookaheadW: laW}};
+              }
+            }
+
+          } else {
+            if (cutModel === "guillotine"){
+              for (const sr of splitRules){
+                if (performance.now() - start > budget) break outer;
+
+                const packed = packFloatGuillotineGreedy(ordered, sheetChoices, trimX, trimY, allowRotate, {
+                  heuristic: heu, splitRule: sr, sheetRule: rule, alpha, lookaheadW: laW
+                });
+                attempts++;
+                const sc = scorePlan(packed.sheets, preferTraverses, traverseAxis, minTraverse, maxTraverse);
+                if (betterScore(sc, bestScoreObj)){
+                  bestScoreObj = sc;
+                  best = {packed, cfg:{ord, heu, rule, alpha, splitRule: sr, lookaheadW: laW}};
+                }
+              }
+            } else {
+              const packed = packFloatMaxRectsGreedy(ordered, sheetChoices, trimX, trimY, allowRotate, {
+                heuristic: heu, sheetRule: rule, alpha, lookaheadW: laW
+              });
+              attempts++;
+              const sc = scorePlan(packed.sheets, preferTraverses, traverseAxis, minTraverse, maxTraverse);
+              if (betterScore(sc, bestScoreObj)){
+                bestScoreObj = sc;
+                best = {packed, cfg:{ord, heu, rule, alpha, lookaheadW: laW}};
               }
             }
           }
@@ -1032,10 +1355,12 @@ function buildAndOptimize(){
 
   const preferTraverses = $('traverseMode').value === "on";
   const traverseAxis = $('traverseAxis').value; // "x" | "y"
-
   const minTraverse = Math.max(1, Math.floor(Number($('minTraverse').value) || 120));
   const maxTraverseRaw = Math.floor(Number($('maxTraverse').value) || 800);
   const maxTraverse = Math.max(minTraverse, maxTraverseRaw);
+
+  let cutModel = $('cutModel').value; // float only
+  if (mode === "vsg") cutModel = "guillotine";
 
   const sheetChoicesRaw = parseSheetList($('sheetList').value);
   if (!sheetChoicesRaw.length){
@@ -1066,10 +1391,9 @@ function buildAndOptimize(){
   const rects = expandCuts(items);
 
   const t0 = performance.now();
-  const {packed, cfg, attempts} = optimizeHighQuality(
-    rects, mode, sheetChoices, trimX, trimY,
-    allowRotate, keepTogether,
-    preferTraverses, traverseAxis, minTraverse, maxTraverse
+  const {packed, cfg, attempts, bestScoreObj} = optimizeHighQuality(
+    rects, mode, cutModel, sheetChoices, trimX, trimY,
+    allowRotate, keepTogether, preferTraverses, traverseAxis, minTraverse, maxTraverse
   );
   const t1 = performance.now();
 
@@ -1079,20 +1403,26 @@ function buildAndOptimize(){
     meta: {
       createdAt: new Date().toISOString(),
       mode,
+      cutModel,
       allowRotate,
       keepTogether,
       preferTraverses,
       traverseAxis,
       minTraverse,
       maxTraverse,
-      algorithm: mode === "vsg" ? "Guillotine Multi-Start (Lookahead)" : "MaxRects Multi-Start (Lookahead)",
+      algorithm: mode === "vsg"
+        ? "Guillotine Multi-Start (Lookahead)"
+        : (cutModel === "guillotine"
+          ? "Float Guillotine Multi-Start (Lookahead)"
+          : "Float MaxRects Multi-Start (Lookahead) + Glass-Feasibility Filter"),
       bestConfig: cfg,
       attempts,
       runtime_ms: Math.round(t1 - t0),
       lookaheadWeight: cfg?.lookaheadW ?? 0,
       units: "mm",
       trimIsBothSides: true,
-      kerf: 0
+      kerf: 0,
+      feasible: totals.feasible
     },
     input: {
       sheetChoices,
@@ -1106,12 +1436,17 @@ function buildAndOptimize(){
       used_mm2: totals.usedArea,
       sheet_mm2: totals.totalArea,
       waste_mm2: totals.waste,
-      traverse_mm2: totals.traverse
+      traverse_mm2: totals.traverse,
+      feasible: totals.feasible
     }
   };
 
   currentIndex = 0;
   updateUI();
+
+  if (!currentPlan.totals.feasible){
+    alert("Hinweis: Ergebnis ist nicht vollständig glas-schnittbar (sollte selten passieren). Bitte Qualität erhöhen oder Guillotine-Modus nutzen.");
+  }
 }
 
 /** ---------------------------
@@ -1211,10 +1546,11 @@ function updateUI(){
 
   const trav_m2 = mm2_to_m2(p.totals.traverse_mm2 || 0);
   const axisLabel = p.meta.traverseAxis === "y" ? "Y (vertikal)" : "X (horizontal)";
-  const travTxt = p.meta.preferTraverses ? ` · Traversen: ${fmt(trav_m2,2)} m² (Tie-Break, ${axisLabel})` : "";
+  const travTxt = p.meta.preferTraverses ? ` · Traversen-Bänder: ${fmt(trav_m2,2)} m² (${axisLabel})` : "";
+  const feasTxt = p.totals.feasible ? "Schnittbar: JA" : "Schnittbar: NEIN";
 
   $('summaryLine').textContent =
-    `Tafeln: ${p.totals.sheets} · Nutzung: ${fmt(used_m2,2)} m² · Verschnitt: ${fmt(waste_m2,2)} m² · Ausbeute: ${fmt(yieldPct,1)}% · Läufe: ${p.meta.attempts} · ${p.meta.runtime_ms} ms · Lookahead: ${fmt(p.meta.lookaheadWeight,2)}${travTxt}`;
+    `Tafeln: ${p.totals.sheets} · Nutzung: ${fmt(used_m2,2)} m² · Verschnitt: ${fmt(waste_m2,2)} m² · Ausbeute: ${fmt(yieldPct,1)}% · ${feasTxt} · Läufe: ${p.meta.attempts} · ${p.meta.runtime_ms} ms · Lookahead: ${fmt(p.meta.lookaheadWeight,2)}${travTxt}`;
 
   const sh = p.sheets[currentIndex];
   const sheetArea_m2 = mm2_to_m2(sh.width*sh.height);
@@ -1225,6 +1561,7 @@ function updateUI(){
   $('statsPills').innerHTML = "";
   const pills = [
     `Modus: ${p.meta.mode === "vsg" ? "VSG" : "Floatglas"}`,
+    `Schnittmodell: ${p.meta.mode==="vsg" ? "Guillotine" : (p.meta.cutModel==="free" ? "Free+Filter" : "Guillotine")}`,
     `Aktuelle Tafel: ${currentIndex+1}/${p.sheets.length}`,
     `Format: ${sh.width}×${sh.height} mm`,
     `Nutzfläche: ${sh.usableWidth}×${sh.usableHeight} mm`,
@@ -1254,15 +1591,22 @@ function updateUI(){
   const cfg = p.meta.bestConfig || {};
   const cfgLine = p.meta.mode === "vsg"
     ? `Order=${cfg.ord}, Heu=${cfg.heu}, Split=${cfg.splitRule}, SheetRule=${cfg.rule}, α=${cfg.alpha}, LA=${fmt(cfg.lookaheadW||0,2)}`
-    : `Order=${cfg.ord}, Heu=${cfg.heu}, SheetRule=${cfg.rule}, α=${cfg.alpha}, LA=${fmt(cfg.lookaheadW||0,2)}`;
+    : (p.meta.cutModel === "guillotine"
+      ? `Order=${cfg.ord}, Heu=${cfg.heu}, Split=${cfg.splitRule}, SheetRule=${cfg.rule}, α=${cfg.alpha}, LA=${fmt(cfg.lookaheadW||0,2)}`
+      : `Order=${cfg.ord}, Heu=${cfg.heu}, SheetRule=${cfg.rule}, α=${cfg.alpha}, LA=${fmt(cfg.lookaheadW||0,2)}`);
 
   const travLine = p.meta.preferTraverses
-    ? `<div><b>Traversen:</b> AN · Achse=${axisLabel} · Min=${p.meta.minTraverse} mm · Max=${p.meta.maxTraverse} mm · Gesamt=${fmt(mm2_to_m2(p.totals.traverse_mm2||0),2)} m²</div>`
+    ? `<div><b>Traversen:</b> AN · Achse=${axisLabel} · Min=${p.meta.minTraverse} mm · Max=${p.meta.maxTraverse} mm · Summe=${fmt(mm2_to_m2(p.totals.traverse_mm2||0),2)} m²</div>`
     : `<div><b>Traversen:</b> AUS</div>`;
+
+  const feasLine = p.totals.feasible
+    ? `<div><b>Glas-Schnittbarkeit:</b> JA (Vollschnitte rekursiv möglich)</div>`
+    : `<div><b>Glas-Schnittbarkeit:</b> NEIN (Layout würde “um die Ecke” erfordern)</div>`;
 
   $('report').innerHTML = `
     <div><b>Optimizer:</b> ${escapeHtml(p.meta.algorithm)} · ${p.meta.mode.toUpperCase()} · Rotation: ${p.meta.allowRotate ? "Ja" : "Nein"}</div>
     <div><b>Positionen zusammenhalten:</b> ${p.meta.keepTogether ? "Ja (kann Ausbeute reduzieren)" : "Nein (Standard, beste Ausnutzung)"}</div>
+    ${feasLine}
     ${travLine}
     <div><b>Beste Konfiguration:</b> ${escapeHtml(cfgLine)}</div>
     <div><b>Tafelliste:</b> ${p.input.sheetChoices.map(sc=>`${sc.w}x${sc.h}`).join(", ")}</div>
@@ -1315,7 +1659,7 @@ async function importCSV(file){
     const name=parts[0], w=Number(parts[1]), h=Number(parts[2]), qty=Number(parts[3]);
     if (Number.isFinite(w)&&Number.isFinite(h)&&Number.isFinite(qty)) rows.push({name, w:Math.floor(w), h:Math.floor(h), qty:Math.floor(qty)});
   }
-  if (!rows.length){ alert("CSV konnte nicht gelesen werden. Erwartet: Name,Breite,Höhe,Menge"); return; }
+  if (!rows.length){ alert("CSV konnte nicht gelesen werden. Erwartet: Name,Breite_mm,Höhe_mm,Menge"); return; }
   cutsTbody.innerHTML=""; for (const r of rows) addCutRow(r);
 }
 async function importJSON(file){
@@ -1324,13 +1668,17 @@ async function importJSON(file){
 
   if (obj && obj.input && obj.input.cuts && obj.sheets){
     currentPlan=obj; currentIndex=0;
+
     const sc=obj.input.sheetChoices||[];
     if (Array.isArray(sc) && sc.length) $('sheetList').value = sc.map(s=>`${s.w}x${s.h}`).join("\n");
+
     $('glassMode').value = obj.meta?.mode || "float";
     $('allowRotate').value = obj.meta?.allowRotate ? "1" : "0";
     $('keepTogether').checked = !!obj.meta?.keepTogether;
 
-    const pref = obj.meta?.preferTraverses !== false; // default true if missing
+    $('cutModel').value = obj.meta?.cutModel ?? "guillotine";
+
+    const pref = obj.meta?.preferTraverses !== false;
     $('traverseMode').value = pref ? "on" : "off";
     $('traverseAxis').value = obj.meta?.traverseAxis ?? "x";
     $('minTraverse').value = obj.meta?.minTraverse ?? 120;
@@ -1399,36 +1747,16 @@ async function exportPDFAll(){
 }
 
 /** ---------------------------
- *  Mode UI
- * --------------------------- */
-function applyModeUI(){
-  const mode = $('glassMode').value;
-  const isVsg = mode === "vsg";
-  $('trimX').disabled = isVsg;
-  $('trimY').disabled = isVsg;
-
-  if (isVsg){
-    $('trimX').value = 0;
-    $('trimY').value = 0;
-    $('showTrim').value = "0";
-    $('modeHint').textContent = "VSG: kein Randschnitt + Guillotine (keine Z-Schnitte). Lookahead aktiv je nach Qualität. Traversen (wenn AN): Tie-Break nach X/Y und Min/Max Breite.";
-  } else {
-    $('modeHint').textContent = "Float: beidseitiger Randschnitt + MaxRects. Lookahead aktiv je nach Qualität. Traversen (wenn AN): Tie-Break nach X/Y und Min/Max Breite.";
-  }
-
-  if (currentPlan) updateUI();
-}
-
-/** ---------------------------
  *  Wire up
  * --------------------------- */
-$('glassMode').addEventListener('change', applyModeUI);
 $('showTrim').addEventListener('change', () => { if (currentPlan) updateUI(); });
 $('canvasScaleMode').addEventListener('change', () => { if (currentPlan) updateUI(); });
 
 $('addRowBtn').addEventListener('click', () => addCutRow({name:"", w:500, h:300, qty:1}));
 $('fillDemoBtn').addEventListener('click', () => {
   cutsTbody.innerHTML="";
+  addCutRow({name:"Pos80", w:3210, h:2250, qty:1});
+  addCutRow({name:"Pos70", w:2000, h:1000, qty:1});
   addCutRow({name:"Pos10", w:1200, h:800, qty:2});
   addCutRow({name:"Pos20", w:900, h:700, qty:3});
   addCutRow({name:"Pos30", w:600, h:400, qty:6});
@@ -1469,8 +1797,8 @@ $('pngBtn').addEventListener('click', exportPNGCurrent);
 $('pdfBtn').addEventListener('click', exportPDFAll);
 
 // init
-addCutRow({name:"Pos10", w:1000, h:500, qty:1});
-addCutRow({name:"Pos20", w:800, h:600, qty:2});
+addCutRow({name:"Pos10", w:1200, h:800, qty:2});
+addCutRow({name:"Pos20", w:900, h:700, qty:3});
 applyModeUI();
 applyTraverseUI();
 updateUI();
